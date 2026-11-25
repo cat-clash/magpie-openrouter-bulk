@@ -70,8 +70,18 @@ magpie accounts import openrouter-live api_keys.json --yes
 - GET `/api/v1/key`：`limit` / `limit_remaining`（key 自己的信用限额，注册号默认 $100）→ 「key limit」窗口；`limit_reset`（daily/weekly/monthly）决定重置时间
 - `free_model_daily_requests`（used/limit）→ 「free models」窗口，UTC 每日重置
 - `usage_daily` → 「today」窗口
-- GET `/api/v1/credits`：`total_credits` / `total_usage` → 账户信用余额。免费账号没有信用余额时，余额回退显示 key 的 `limit_remaining`（即 $100 限额剩余）
 - `effective_budget` / `budgets`（org 管理的预算）非 `key_limit` scope 时单独一个「budget」窗口
+- 余额：免费账号没有信用余额时显示 key 的 `limit_remaining`（即 $100 限额剩余）
+
+### 批量账号下的限流保护（0.3.1）
+
+几十个账号 + 代理同一出口 IP 时，GUI 每次刷新全量拉 quota 会把 78+ 请求瞬间打到 OpenRouter，触发 per-IP 突发限流，表现为「暂时无法获取最新额度 · context deadline exceeded」。0.3.1 起：
+
+- **并发闸**：所有账号共享一个全局信号量，同时最多 3 个 usage 请求在飞，每个请求前加 0–300ms 随机抖动打散突发
+- **超时 + 重试**：单请求 `AbortSignal` 8s 超时；429/5xx/超时按 500ms→1500ms→3000ms 指数退避，最多重试 3 次
+- **跨账号缓存**：成功结果缓存 10 分钟，GUI 刷新在有效期内直接返回缓存、不再打 API；失败结果缓存 60 秒，避免死账号每次刷新都重试
+- **partial 容错**：某把 key 瞬时失败时保留上次成功快照并标 `stale`（带时间戳），不再让整体 usage 报错
+- **砍掉 `/credits`**：免费层 key 的 `/credits` 无意义（余额 = key limit 已在 `/key` 里），正常路径只打 `/key`，每账号请求数减半
 
 ## OpenRouter 官网调研要点
 
@@ -147,6 +157,10 @@ bun test .        # bun（本机 magpie 自带 bun 亦可）
 
 ## 更新日志
 
+- **0.3.1**（2026-11-26）
+  - 修复批量账号 quota 拉取超时（`context deadline exceeded`）：全局并发闸（3）+ 0–300ms 抖动 + 8s 超时 + 429/5xx 指数退避重试（500/1500/3000ms）
+  - usage 结果跨账号缓存：成功 10 分钟、失败 60 秒；瞬时失败保留上次成功快照标 `stale`
+  - 砍掉正常路径的 `/credits` 探测（免费层无意义），每账号请求数减半
 - **0.3.0**（2026-11-26）
   - 导入验证后把 `limit`/`limit_remaining`/`usage`/`free_tier`/`free_daily_limit`/`label` 快照进账号 metadata
   - 验证请求 429/5xx 自动重试（500ms、1500ms）；401/403 的失败原因带上 OpenRouter 返回的原始错误信息

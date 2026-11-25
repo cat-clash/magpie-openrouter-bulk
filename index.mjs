@@ -1,6 +1,6 @@
 import { BASE, fetchCatalog } from "./catalog.mjs"
 import { prepare } from "./request.mjs"
-import { readUsage } from "./usage.mjs"
+import { clearUsageCache, readUsageCached } from "./usage.mjs"
 
 const PROVIDER = "openrouter-live"
 const ICON = "https://cdn.simpleicons.org/openrouter"
@@ -234,7 +234,10 @@ export const OpenRouterPlugin = async ({ client } = {}, options) => ({
     async usage(getAuth) {
       const auth = await getAuth()
       if (auth?.type !== "api" || !auth.key) return { error: "OpenRouter has no key for this account", windows: [] }
-      const report = await readUsage(fetch, auth.key)
+      // readUsageCached caps concurrency (3), jitters, times out (8s), retries
+      // 429/5xx with backoff and serves a 10-minute cache so a GUI refresh does
+      // not re-hit OpenRouter for every one of the bulk accounts.
+      const report = await readUsageCached(fetch, auth.key)
       if (report.user) {
         try {
           await rememberName(client, auth, report.user)
@@ -283,4 +286,4 @@ export const OpenRouterPlugin = async ({ client } = {}, options) => ({
   },
 })
 
-export const _internal = { PROVIDER, rememberName, parseKeyText, parseKeyEntries, importKeys, clearCatalogCache: () => catalogCache.clear() }
+export const _internal = { PROVIDER, rememberName, parseKeyText, parseKeyEntries, importKeys, clearCatalogCache: () => catalogCache.clear(), clearUsageCache: () => clearUsageCache() }
