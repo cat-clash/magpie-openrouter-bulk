@@ -1,0 +1,5 @@
+*.bak
+*.bak-*
+_bak-doctor*/
+node_modules/
+*.log

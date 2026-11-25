@@ -1,0 +1,24 @@
+{
+  "name": "magpie-openrouter-bulk",
+  "version": "0.3.0",
+  "description": "OpenRouter provider plugin for magpie/OpenCode with batch key import support (based on biyan113/magpie-openrouter)",
+  "type": "module",
+  "main": "./index.mjs",
+  "files": [
+    "index.mjs",
+    "catalog.mjs",
+    "request.mjs",
+    "usage.mjs",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": ["opencode", "opencode-plugin", "provider", "openrouter", "magpie", "bulk-import"],
+  "license": "MIT",
+  "engines": { "node": ">=18" },
+  "scripts": { "test": "node --test" },
+  "magpie": {
+    "icon": "https://cdn.simpleicons.org/openrouter",
+    "maxConcurrency": 8,
+    "options": { "referer": "https://usemagpie.ai", "title": "magpie" }
+  }
+}
