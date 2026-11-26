@@ -1,50 +1,69 @@
-# 账号池面板（未启用 · 待验证）
+# 账号池面板（已启用）
 
 ## 状态
 
-**面板代码已完成，但 magpie 未加载**，因此 `package.json` 的 `magpie.panels` 声明已暂时移除，避免发布未验证的功能。
+**已按 magpie 的正确契约重写并启用**（2026-11-27 07:05）。
 
-## 探测结果（2026-11-27 04:15）
+## 关键认知修正（之前判断错了）
 
-按 marvis 插件（`magpie-marvis-final` v0.8.8）的相同格式声明了 `magpie.panels`：
+第一次尝试失败时，我以为是「本地目录 spec 不被 magpie 识别」。查 marvis 的 `tests/panel-manifest.test.mjs` 后发现真正原因：
 
-```json
-"panels": [{
-  "slot": "provider",
-  "title": "账号池 Account pool",
-  "titles": { "zh": "账号池", "en": "Account pool" },
-  "file": "panel/pool.html"
-}]
+```
+test("面板不得自己发网络请求（沙箱里也没有网络）", () => {
+    assert.ok(!/\bfetch\s*\(/.test(js), "面板不该 fetch：越权也没有网络")
+})
 ```
 
-随后：
-- `magpie plugin off/on` → 面板未注册
-- 重启 magpie 进程 → 面板未注册
-- 探测 gateway 路由，全部 404：
-  - `/_magpie/panel/magpie-openrouter-bulk/pool.html`
-  - `/_magpie/panels/magpie-openrouter-bulk/pool.html`
-  - `/_magpie/plugins/magpie-openrouter-bulk/panel/pool.html`
-  - `/_magpie/bridge.js`
-- `plugin-providers.json` 里 openrouter 条目：`name` 从空更新为 `"OpenRouter"`（说明 package.json 的 magpie 字段确实被读取），但**没有 panels 字段**
+**面板跑在 sandbox 里（`connect-src 'none'`），没有网络。** 第一版 `pool.js` 用 `fetch('/v1/magpie/quotas')` 和 `fetch('/v1/magpie/quotas/refresh')` —— 这在面板里永远失败，「一键刷新」按钮不可能工作。
 
-## 已知差异
+另外：`panels` **不会**写进 `plugin-providers.json`（marvis / meoo 也都不在里面），所以「配置里搜不到 panels」不能当作未注册的证据 —— 那是误判。
 
-| 项 | 本插件 | marvis |
-|---|---|---|
-| spec 形态 | `C:\...\plugins-src\magpie-openrouter-bulk`（**本地目录**） | `github:cat-clash/magpie-marvis`（**远程包**） |
+## 正确契约（出处：magpie `docs/subsystems/plugin-runtime.md` P5）
 
-**推测**：magpie 可能只对 npm / github 安装的包解析 `magpie.panels` 并从包内提供静态资源路由；本地目录 spec 走的加载路径不同。
+- `panels: [{ slot, file, title }]`，`slot ∈ {agents, usage, settings, provider}`
+- `file` 必须是插件目录里的 `.html`，且要在 `package.json` 的 `files` 白名单里
+- 面板必须加载 `<script src="_magpie/bridge.js">`
+- 面板通过 `magpie.options.get()` / `.set()` 读写**本插件选项**
+- `options.set` 是**整份替换**（一秒最多一次），写回必须展开读到的整份 opts
+- **面板无网络**：数据只能来自插件主进程写好的文件
 
-## 待验证的下一步
+## 实现
 
-1. 把插件以 `github:` 形式安装（本仓库已推 GitHub），看 panels 是否注册
-2. 对比 marvis 在你机器上的面板是否真的可见（若 marvis 面板也不显示，说明是 magpie 版本不支持而非安装方式差异）
-3. 检查 GUI 端（非 gateway）的静态路由前缀——`_magpie/bridge.js` 在 gateway 上 404，说明它由 GUI 应用层提供，需从 GUI URL（`http://127.0.0.1:<port>`）探测
+| 文件 | 作用 |
+|---|---|
+| `pool.html` | 结构：概览 + 账号网格 + 选项编辑区 |
+| `pool.js` | 读 `globalThis.__OR_POOL__` 渲染；`magpie.options.get/set` 编辑 failover 选项；**无 fetch** |
+| `pool.css` | 跟随 magpie 主题变量（`--fg` / `--muted` / `--border` / `--accent`） |
+| `pool-state.js` | **自动生成**，插件每次 quota 刷新后写入；面板的唯一数据源 |
 
-## 文件
+插件侧：`src/hooks/poolstate.mjs` 负责写快照，`src/hooks/usage.mjs` 在每次 `auth.usage` 后并入账号池并落盘（进程重启会从 `pool-state.js` 恢复）。
 
-- `pool.html` — 面板结构（一行概览 + 一键刷新按钮 + 可折叠账号网格）
-- `pool.js` — 逻辑：读 `/v1/magpie/quotas?kept=1`、`POST /v1/magpie/quotas/refresh?provider=openrouter-live`
-- `pool.css` — 用 magpie 主题变量（`--fg` / `--muted` / `--border` / `--accent`）自动跟随明暗主题
+## 面板能做什么
 
-验证通过后，把 `panels` 声明加回 `package.json` 的 `magpie` 字段即可。
+1. **账号池概览**：总数 / 有额度 / 已用尽 / 剩余请求总数
+2. **账号网格**：每个账号一根进度条（剩余/上限），按剩余降序
+3. **Failover 选项编辑**（magpie 原生只支持布尔开关，数值项必须走面板）：
+   - `fallbackToHealthy` 死模型自动改投健康模型
+   - `healthyModelsOnly` 只列健康模型
+   - `freeOnly` 只列免费模型
+   - `requestIntervalMs` 每 key 最小间隔
+   - `freeRpmLimit` 免费模型每分钟上限
+   - `dailyGuard` 日额度耗尽时短路
+
+## 「一键刷新」的正确做法
+
+面板里做不了（无网络）。用这两个：
+
+```powershell
+# 桌面快捷方式：OpenRouter一键刷新.lnk
+powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\c\Documents\deepseek-harness\default-workspace\api-registrar\一键刷新状态.ps1"
+```
+
+或 `magpie quota refresh openrouter-live`（刷新后面板数据也会更新）。
+
+## 验证记录（2026-11-27 07:04）
+
+- `magpie quota refresh openrouter-live` → `panel/pool-state.js` 生成 8959 字节，含 58 账号额度
+- 网关 3/3 实测 200
+- 全量测试 64 passed
+- GUI 面板是否显示需人工在 magpie 界面确认（面板由 GUI 应用层提供，gateway 路由探测不到属正常）

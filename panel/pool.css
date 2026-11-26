@@ -1,115 +1,59 @@
-/* OpenRouter 账号池面板样式 — 跟随 magpie 主题变量，无硬编码配色 */
-.pool {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  font: inherit;
-}
+/* OpenRouter 账号池面板 — 跟随 magpie 主题变量 */
+.or-pool { display: flex; flex-direction: column; gap: 10px; font: inherit; }
+.muted { color: var(--muted, #6b7280); }
 
-.pool-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
+.head { display: flex; flex-direction: column; gap: 2px; }
+.head .big { font-weight: 600; font-variant-numeric: tabular-nums; }
+.head .sub { color: var(--muted, #6b7280); font-size: .86em; font-variant-numeric: tabular-nums; }
 
-.pool-label {
-  font-weight: 600;
-  color: var(--fg, inherit);
-}
-
-.pool-value {
-  flex: 1 1 auto;
-  min-width: 0;
-  color: var(--muted, #6b7280);
-  font-variant-numeric: tabular-nums;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.pool-btn {
-  font: inherit;
-  padding: 4px 10px;
-  border-radius: 6px;
-  border: 1px solid var(--border, #d4d4d8);
-  background: var(--btn-bg, transparent);
-  color: inherit;
-  cursor: pointer;
-}
-
-.pool-btn:hover { border-color: var(--accent, #52525b); }
-.pool-btn:disabled { opacity: .55; cursor: default; }
-
-.pool-primary {
-  border-color: var(--accent, #52525b);
-  font-weight: 600;
-}
-
-.pool-status {
-  margin: 0;
-  min-height: 1em;
-  font-size: .86em;
-  color: var(--muted, #6b7280);
-}
-
-.pool-details { margin-top: 2px; }
-.pool-details summary {
-  cursor: pointer;
-  font-size: .9em;
-  color: var(--muted, #6b7280);
-  user-select: none;
-}
-
-.pool-grid {
+.grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 8px;
-  margin-top: 8px;
-  max-height: 320px;
+  max-height: 300px;
   overflow-y: auto;
 }
 
-.pool-card {
+.card {
   border: 1px solid var(--border, #d4d4d8);
   border-radius: 8px;
   padding: 6px 8px;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: .82em;
+  font-size: .8em;
 }
+.card.spent { opacity: .6; }
+.card .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.card .bar { height: 4px; border-radius: 999px; background: var(--border, #e4e4e7); overflow: hidden; }
+.card .bar i { display: block; height: 100%; background: var(--accent, #52525b); border-radius: 999px; }
+.card .meta { color: var(--muted, #6b7280); font-variant-numeric: tabular-nums; }
 
-.pool-card.spent { opacity: .62; }
-
-.pool-card-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 500;
+.opts {
+  border-top: 1px solid var(--border, #e4e4e7);
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
+.opts-title { font-weight: 600; font-size: .9em; }
+.opt { display: flex; align-items: center; gap: 8px; font-size: .86em; }
+.opt-label { flex: 1 1 auto; color: var(--muted, #6b7280); }
+.opt input[type="number"] { width: 90px; font: inherit; padding: 2px 6px; }
+.opt input[type="checkbox"] { width: 16px; height: 16px; }
 
-.pool-bar {
-  height: 4px;
-  border-radius: 999px;
-  background: var(--border, #e4e4e7);
-  overflow: hidden;
+.btn {
+  align-self: flex-start;
+  font: inherit;
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--accent, #52525b);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-weight: 600;
 }
+.btn:hover { background: var(--border, #e4e4e7); }
+.btn:disabled { opacity: .55; cursor: default; }
 
-.pool-bar i {
-  display: block;
-  height: 100%;
-  background: var(--accent, #52525b);
-  border-radius: 999px;
-}
-
-.pool-card-meta {
-  color: var(--muted, #6b7280);
-  font-variant-numeric: tabular-nums;
-}
-
-.pool-note {
-  margin: 8px 0 0;
-  font-size: .78em;
-  color: var(--muted, #6b7280);
-}
+.hint { color: var(--muted, #6b7280); font-size: .8em; }

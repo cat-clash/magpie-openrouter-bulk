@@ -1,49 +1,67 @@
-{
-  "name": "magpie-openrouter-bulk",
-  "version": "0.5.0",
-  "description": "OpenRouter provider plugin for magpie/OpenCode with batch key import, dual-dimension 429 failover and per-account quota helpers (based on biyan113/magpie-openrouter)",
-  "type": "module",
-  "main": "./index.mjs",
-  "files": [
-    "index.mjs",
-    "src",
-    "failover.mjs",
-    "catalog.mjs",
-    "request.mjs",
-    "usage.mjs",
-    "panel",
-    "README.md",
-    "LICENSE"
-  ],
-  "keywords": [
-    "opencode",
-    "opencode-plugin",
-    "provider",
-    "openrouter",
-    "magpie",
-    "bulk-import",
-    "failover",
-    "free-models"
-  ],
-  "license": "MIT",
-  "engines": { "node": ">=18" },
-  "scripts": { "test": "node --test" },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/cat-clash/magpie-openrouter-bulk.git"
-  },
-  "homepage": "https://github.com/cat-clash/magpie-openrouter-bulk#readme",
-  "magpie": {
-    "icon": "https://cdn.simpleicons.org/openrouter",
-    "name": "OpenRouter",
-    "maxConcurrency": 8,
-    "options": { "referer": "https://usemagpie.ai", "title": "magpie" }
-  },
-  "optionsExample": {
-    "_说明": "批量导入的 OpenRouter key 账号池。fallbackToHealthy：请求点到已实测全灭的模型（ling-3.2-flash、gemma-4-*）时，直接改投一个健康免费模型，省一次必 429 的请求。healthyModelsOnly：模型列表只暴露实测健康的零价模型，隐藏 429 死模型。freeOnly：只列免费号真能调用的零价模型（不列 600+ 付费模型）。",
-    "fallbackToHealthy": false,
-    "healthyModelsOnly": false,
-    "freeOnly": false,
-    "providerSort": "price"
-  }
+﻿{
+    "name":  "magpie-openrouter-bulk",
+    "version":  "0.6.0",
+    "description":  "OpenRouter provider plugin for magpie/OpenCode with batch key import, dual-dimension 429 failover and per-account quota helpers (based on biyan113/magpie-openrouter)",
+    "type":  "module",
+    "main":  "./index.mjs",
+    "files":  [
+                  "index.mjs",
+                  "failover.mjs",
+                  "catalog.mjs",
+                  "request.mjs",
+                  "usage.mjs",
+                  "src",
+                  "panel",
+                  "README.md",
+                  "LICENSE"
+              ],
+    "keywords":  [
+                     "opencode",
+                     "opencode-plugin",
+                     "provider",
+                     "openrouter",
+                     "magpie",
+                     "bulk-import",
+                     "failover",
+                     "free-models"
+                 ],
+    "license":  "MIT",
+    "engines":  {
+                    "node":  "\u003e=18"
+                },
+    "scripts":  {
+                    "test":  "node --test"
+                },
+    "repository":  {
+                       "type":  "git",
+                       "url":  "git+https://github.com/cat-clash/magpie-openrouter-bulk.git"
+                   },
+    "homepage":  "https://github.com/cat-clash/magpie-openrouter-bulk#readme",
+    "magpie":  {
+                   "icon":  "https://cdn.simpleicons.org/openrouter",
+                   "name":  "OpenRouter",
+                   "maxConcurrency":  8,
+                   "options":  {
+                                   "referer":  "https://usemagpie.ai",
+                                   "title":  "magpie"
+                               },
+                   "panels":  [
+                                  {
+                                      "slot":  "provider",
+                                      "file":  "panel/pool.html",
+                                      "title":  "账号池 Account pool",
+                                      "titles":  {
+                                                     "zh":  "账号池",
+                                                     "en":  "Account pool"
+                                                 }
+                                  }
+                              ]
+               },
+    "optionsExample":  {
+                           "_说明":  "批量导入的 OpenRouter key 账号池。fallbackToHealthy：请求点到已实测全灭的模型（ling-3.2-flash、gemma-4-*）时，直接改投一个健康免费模型，省一次必 429 的请求。healthyModelsOnly：模型列表只暴露实测健康的零价模型，隐藏 429 死模型。freeOnly：只列免费号真能调用的零价模型（不列 600+ 付费模型）。",
+                           "fallbackToHealthy":  false,
+                           "healthyModelsOnly":  false,
+                           "freeOnly":  false,
+                           "providerSort":  "price"
+                       }
 }

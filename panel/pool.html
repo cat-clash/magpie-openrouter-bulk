@@ -2,29 +2,13 @@
 <html lang="zh">
 <head>
 <meta charset="utf-8">
-<title>OpenRouter 账号池 · OpenRouter</title>
+<title>账号池 · OpenRouter</title>
 <link rel="stylesheet" href="pool.css">
 <script src="_magpie/bridge.js"></script>
+<script src="pool-state.js"></script>
 <script src="pool.js" defer></script>
 </head>
 <body>
-
-<section class="pool">
-  <!-- 概览行 -->
-  <div class="pool-row">
-    <span class="pool-label" id="label">账号池</span>
-    <span class="pool-value" id="summary">—</span>
-    <button id="refresh" class="pool-btn pool-primary" type="button">一键刷新</button>
-  </div>
-  <p class="pool-status" id="status" role="status" aria-live="polite"></p>
-
-  <!-- 详情（折叠） -->
-  <details class="pool-details" id="details">
-    <summary id="details-summary">详情</summary>
-    <div class="pool-grid" id="grid"></div>
-    <p class="pool-note" id="note"></p>
-  </details>
-</section>
-
+<div id="root" class="or-pool"><p class="muted">读取中…</p></div>
 </body>
 </html>

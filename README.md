@@ -228,6 +228,12 @@ bun test .        # bun（本机 magpie 自带 bun 亦可）
 
 ## 更新日志
 
+- **0.6.0**（2026-11-27）
+  - **模块化重构**：`index.mjs` 16KB → 3.4KB（只做装配），钩子拆到 `src/hooks/`（config / options / import / loader / usage / models / poolstate），常量与静态表在 `src/context.mjs`；行为零变化
+  - **请求节奏控制**（`src/pacing.mjs`）：每 key 最小间隔、免费模型 RPM 滑动窗口（默认 20/min）、日额度耗尽短路（`dailyGuard`）
+  - **GUI 面板**（`panel/`，slot: provider）：账号池概览 + 每账号额度进度条 + failover 选项编辑。面板无网络，数据由插件写入 `panel/pool-state.js`
+  - 全量测试 **64 passed**
+
 - **未发布 · 请求节奏控制**（2026-11-27）
   - 新增 `src/pacing.mjs`：`createPacer()` → `{ take, refund, noteUsage, snapshot }`，三件事各自独立可关
   - 最小请求间隔 `requestIntervalMs`（默认 0 = 不延迟，保持原行为）

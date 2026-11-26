@@ -1,172 +1,169 @@
 // OpenRouter 账号池面板（magpie.panels, slot: provider）
 //
-// 一行概览 + 一个「一键刷新」按钮 + 可折叠详情。
-// 刷新走 magpie 自己的网关端点（同源，无需额外权限）：
-//   GET  /v1/magpie/quotas            —— 读所有 provider 的额度快照
-//   POST /v1/magpie/quotas/refresh    —— 触发重新探测
-// 目标 provider id 从面板 URL 的 ?provider= 或固定常量取。
+// ⚠ 面板跑在 sandbox 里（connect-src 'none'），**没有网络**：
+//   · 不能 fetch —— 数据只能来自插件主进程写好的 pool-state.js
+//   · 不能顶层 await —— 这是经典脚本，包一层 async IIFE
+//   · 只能读写本插件选项：magpie.options.get() / .set()
+//
+// options.set 是**整份替换**（一秒最多一次）：每次都要把读到的 opts 展开再写回。
 
-(async () => {
-  const PROVIDER = "openrouter-live"
-  const PROVIDER_LABEL = "OpenRouter"
+void (async () => {
+  await magpie.ready
 
-  const $ = (id) => document.getElementById(id)
-  const summary = $("summary")
-  const status = $("status")
-  const grid = $("grid")
-  const note = $("note")
-  const btn = $("refresh")
+  const root = document.getElementById("root")
+  const data = globalThis.__OR_POOL__
+
+  const el = (tag, cls, text) => {
+    const node = document.createElement(tag)
+    if (cls) node.className = cls
+    if (text != null) node.textContent = text
+    return node
+  }
 
   const STRINGS = {
     zh: {
-      label: "账号池",
-      details: "详情",
-      refresh: "一键刷新",
-      refreshing: "刷新中…",
-      done: "已刷新",
-      readFail: "读取失败：",
-      refreshFail: "刷新失败：",
-      noData: "暂无数据 — 点「一键刷新」探测",
-      note: "只统计免费模型的每日请求额度；每账号 50 次/天，UTC 0 点重置。",
+      noData: "还没有账号池数据。在 magpie 里用 OpenRouter 发一次请求，或跑一次 quota 刷新，这里就会出现。",
       accounts: "账号",
       withQuota: "有额度",
       exhausted: "已用尽",
-      remaining: "剩余请求",
+      left: "剩余请求",
+      options: "Failover 选项",
+      fallback: "死模型自动改投健康模型",
+      healthyOnly: "只列健康模型",
+      freeOnly: "只列免费模型",
+      interval: "每 key 最小间隔 (ms)",
+      rpm: "免费模型每分钟上限",
+      dailyGuard: "日额度耗尽时短路",
+      save: "保存",
+      saved: "已保存 · 下个请求起生效",
+      saveFail: "保存失败：",
+      readFail: "读取选项失败：",
     },
     en: {
-      label: "Account pool",
-      details: "Details",
-      refresh: "Refresh all",
-      refreshing: "Refreshing…",
-      done: "Refreshed",
-      readFail: "Could not read: ",
-      refreshFail: "Refresh failed: ",
-      noData: "No data yet — press Refresh all",
-      note: "Free-model daily requests only; 50 per account per day, resets at 00:00 UTC.",
+      noData: "No pool data yet. Send one OpenRouter request in magpie, or refresh quotas, and it shows up here.",
       accounts: "accounts",
       withQuota: "with quota",
       exhausted: "exhausted",
-      remaining: "requests left",
+      left: "requests left",
+      options: "Failover options",
+      fallback: "Switch dead models to a healthy one",
+      healthyOnly: "List healthy models only",
+      freeOnly: "List free models only",
+      interval: "Min interval per key (ms)",
+      rpm: "Free-model requests per minute",
+      dailyGuard: "Short-circuit when daily quota is spent",
+      save: "Save",
+      saved: "Saved · applies to the next request",
+      saveFail: "Could not save: ",
+      readFail: "Could not read options: ",
     },
   }
 
-  await magpie.ready
   const lang = String(magpie.theme?.lang || document.documentElement.lang || "en").toLowerCase()
   const t = STRINGS[lang.startsWith("zh") ? "zh" : "en"]
-  $("label").textContent = t.label
-  $("details-summary").textContent = t.details
-  btn.textContent = t.refresh
-  note.textContent = t.note
 
-  /** 从 quota 快照里挑出本 provider 的账号 */
-  const pickAccounts = (payload) => {
-    const rows = []
-    const walk = (o) => {
-      if (!o || typeof o !== "object") return
-      if (Array.isArray(o)) { o.forEach(walk); return }
-      // 一个账号的额度卡：有 provider 且 provider 匹配
-      if (o.provider === PROVIDER && Array.isArray(o.windows)) {
-        rows.push(o)
-        return
-      }
-      // magpie 的 map 形状：{ "provider/user": { quota: {...} } }
-      if (o.quota && o.quota.provider === PROVIDER) {
-        rows.push(o.quota)
-        return
-      }
-      for (const v of Object.values(o)) walk(v)
-    }
-    walk(payload)
-    return rows
-  }
-
-  const freeWindow = (acct) =>
-    (acct.windows || []).find((w) => w && w.name === "free models") || null
-
-  const paint = (accts) => {
-    if (!accts.length) {
-      summary.textContent = t.noData
-      grid.innerHTML = ""
-      return
-    }
+  // ---------- 渲染账号池 ----------
+  if (!data || !Array.isArray(data.accounts) || !data.accounts.length) {
+    root.replaceChildren(el("p", "muted", t.noData))
+  } else {
+    const accts = data.accounts
     let withQuota = 0, exhausted = 0, left = 0
-    const cards = []
     for (const a of accts) {
-      const fw = freeWindow(a)
-      if (!fw) continue
-      const rem = Number(fw.remaining ?? 0)
-      const used = Number(fw.used ?? fw.amount ?? 0)
-      const limit = Number(fw.limit ?? 50)
-      if (rem > 0) { withQuota++; left += rem } else exhausted++
-      cards.push({ user: a.user || a.name || "?", rem, used, limit, resetsAt: fw.resetsAt || fw.resets_at })
+      if ((a.remaining ?? 0) > 0) { withQuota++; left += a.remaining } else exhausted++
     }
-    cards.sort((x, y) => y.rem - x.rem)
 
-    summary.textContent =
-      `${accts.length} ${t.accounts} · ${withQuota} ${t.withQuota} · ` +
-      `${exhausted} ${t.exhausted} · ${left} ${t.remaining}`
+    const head = el("div", "head")
+    head.append(
+      el("div", "big", `${accts.length} ${t.accounts}`),
+      el("div", "sub", `${withQuota} ${t.withQuota} · ${exhausted} ${t.exhausted} · ${left} ${t.left}`),
+    )
+    if (data.at) head.append(el("div", "sub muted", data.at))
+    root.replaceChildren(head)
 
-    grid.innerHTML = ""
-    for (const c of cards.slice(0, 60)) {
-      const el = document.createElement("div")
-      el.className = "pool-card " + (c.rem > 0 ? "ok" : "spent")
-      const name = document.createElement("div")
-      name.className = "pool-card-name"
-      name.textContent = c.user
-      name.title = c.user
-      const bar = document.createElement("div")
-      bar.className = "pool-bar"
-      const fill = document.createElement("i")
-      fill.style.width = Math.max(0, Math.min(100, (c.rem / (c.limit || 50)) * 100)) + "%"
-      bar.appendChild(fill)
-      const meta = document.createElement("div")
-      meta.className = "pool-card-meta"
-      meta.textContent = `${c.used} / ${c.limit} · ${c.rem > 0 ? c.rem + " left" : "0 left"}`
-      el.append(name, bar, meta)
-      grid.appendChild(el)
+    const grid = el("div", "grid")
+    const sorted = [...accts].sort((x, y) => (y.remaining ?? 0) - (x.remaining ?? 0))
+    for (const a of sorted.slice(0, 80)) {
+      const card = el("div", "card " + ((a.remaining ?? 0) > 0 ? "ok" : "spent"))
+      card.append(el("div", "name", a.name || a.user || "?"))
+      const bar = el("div", "bar")
+      const limit = a.limit || 50
+      const fill = el("i")
+      fill.style.width = Math.max(0, Math.min(100, ((a.remaining ?? 0) / limit) * 100)) + "%"
+      bar.append(fill)
+      card.append(bar)
+      card.append(el("div", "meta", `${a.used ?? 0} / ${limit} · ${a.remaining ?? 0} left`))
+      grid.append(card)
     }
+    root.append(grid)
   }
 
-  const readQuotas = async () => {
-    const r = await fetch("/v1/magpie/quotas?kept=1", {
-      headers: { accept: "application/json" },
-      credentials: "same-origin",
-    })
-    if (!r.ok) throw new Error(`HTTP ${r.status}`)
-    return r.json()
+  // ---------- 选项编辑 ----------
+  let opts = {}
+  try {
+    const got = await magpie.options.get()
+    if (got && typeof got === "object" && !Array.isArray(got)) opts = got
+  } catch (err) {
+    root.append(el("p", "hint", t.readFail + (err?.message || err)))
   }
 
-  const load = async () => {
+  const box = el("div", "opts")
+  box.append(el("div", "opts-title", t.options))
+
+  const num = (label, key, def) => {
+    const row = el("label", "opt")
+    row.append(el("span", "opt-label", label))
+    const input = el("input")
+    input.type = "number"
+    input.min = "0"
+    input.value = String(opts[key] ?? def)
+    row.append(input)
+    box.append(row)
+    return { key, input }
+  }
+  const bool = (label, key, def) => {
+    const row = el("label", "opt")
+    row.append(el("span", "opt-label", label))
+    const input = el("input")
+    input.type = "checkbox"
+    input.checked = opts[key] ?? def
+    row.append(input)
+    box.append(row)
+    return { key, input, isBool: true }
+  }
+
+  const fields = [
+    bool(t.fallback, "fallbackToHealthy", false),
+    bool(t.healthyOnly, "healthyModelsOnly", false),
+    bool(t.freeOnly, "freeOnly", false),
+    num(t.interval, "requestIntervalMs", 0),
+    num(t.rpm, "freeRpmLimit", 20),
+    bool(t.dailyGuard, "dailyGuard", true),
+  ]
+
+  const saveBtn = el("button", "btn", t.save)
+  saveBtn.type = "button"
+  const status = el("span", "muted")
+  box.append(saveBtn, status)
+  root.append(box)
+
+  saveBtn.addEventListener("click", async () => {
+    saveBtn.disabled = true
     try {
-      const payload = await readQuotas()
-      paint(pickAccounts(payload))
+      const next = { ...opts }
+      for (const f of fields) {
+        if (f.isBool) next[f.key] = !!f.input.checked
+        else {
+          const n = Number(f.input.value)
+          next[f.key] = Number.isFinite(n) && n >= 0 ? n : 0
+        }
+      }
+      const back = await magpie.options.set(next)
+      if (back && typeof back === "object" && !Array.isArray(back)) opts = back
+      status.textContent = t.saved
     } catch (err) {
-      summary.textContent = t.readFail + (err?.message || err)
-    }
-  }
-
-  await load()
-
-  btn.addEventListener("click", async () => {
-    btn.disabled = true
-    const before = btn.textContent
-    btn.textContent = t.refreshing
-    status.textContent = ""
-    try {
-      const r = await fetch(`/v1/magpie/quotas/refresh?provider=${encodeURIComponent(PROVIDER)}`, {
-        method: "POST",
-        headers: { accept: "application/json", "content-type": "application/json" },
-        credentials: "same-origin",
-        body: "{}",
-      })
-      if (!r.ok) throw new Error(`HTTP ${r.status}`)
-      await load()
-      status.textContent = t.done
-    } catch (err) {
-      status.textContent = t.refreshFail + (err?.message || err)
+      status.textContent = t.saveFail + (err?.message || err)
     } finally {
-      btn.disabled = false
-      btn.textContent = before
+      saveBtn.disabled = false
     }
   })
 })()
