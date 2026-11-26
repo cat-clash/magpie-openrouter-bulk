@@ -1,6 +1,15 @@
 import { BASE, fetchCatalog } from "./catalog.mjs"
 import { prepare } from "./request.mjs"
 import { clearUsageCache, readUsageCached } from "./usage.mjs"
+import {
+  DEAD_MODELS,
+  fetchWithFailover,
+  stats,
+  snapshotStats,
+  fmtFailover,
+  classify429,
+  pickCandidate,
+} from "./failover.mjs"
 
 const PROVIDER = "openrouter-live"
 const ICON = "https://cdn.simpleicons.org/openrouter"
@@ -211,6 +220,33 @@ export const OpenRouterPlugin = async ({ client } = {}, options) => ({
     icon: ICON,
     maxConcurrency: 8,
     methods: [{ type: "api", label: "OpenRouter API key", placeholder: "sk-or-v1-…" }],
+    // magpie 把这些显示成 provider 编辑器里的开关，用户改完立刻生效（input.magpie.options）。
+    options: [
+      {
+        key: "fallbackToHealthy",
+        label: "死模型自动改投健康模型",
+        description:
+          "请求点到实测全灭的模型（ling-3.2-flash / gemma-4-*）时，直接改投一个健康的免费模型，省一次必 429 的请求。默认关，避免改变你指定的模型语义。",
+        default: false,
+        labels: { zh: "死模型自动改投健康模型" },
+        descriptions: {
+          zh: "请求点到实测全灭的模型（ling-3.2-flash / gemma-4-*）时，直接改投一个健康的免费模型，省一次必 429 的请求。默认关，避免改变你指定的模型语义。",
+        },
+        placement: "top",
+      },
+      {
+        key: "healthyModelsOnly",
+        label: "只显示健康模型",
+        description:
+          "开启后在模型列表里隐藏实测模型级全灭的 ling-3.2-flash 与 gemma-4-*，只暴露 9 个健康免费模型。",
+        default: false,
+        labels: { zh: "只显示健康模型" },
+        descriptions: {
+          zh: "开启后在模型列表里隐藏实测模型级全灭的 ling-3.2-flash 与 gemma-4-*，只暴露 9 个健康免费模型。",
+        },
+        placement: "top",
+      },
+    ],
     importFrom: { en: "OpenRouter keys.txt (one key per line, # comments)", zh: "OpenRouter keys.txt（每行一个 Key，# 注释）" },
     importFroms: { en: "OpenRouter keys.txt (one key per line)", zh: "OpenRouter keys.txt（每行一个 Key）" },
     async import(texts, { signal } = {}) {
@@ -223,6 +259,11 @@ export const OpenRouterPlugin = async ({ client } = {}, options) => ({
       if (auth?.type !== "api" || !auth.key) return {}
       const referer = options?.referer || "https://usemagpie.ai"
       const title = options?.title || "magpie"
+      // 模型级 failover 的候选：健康的免费具体模型（排除 openrouter/auto 与
+      // openrouter/free 两个路由器——它们既不解决模型级也不解决 key 级 429）。
+      const candidates = Object.keys(FREE_MODELS).filter(
+        (id) => FREE_MODELS[id].free === true && !id.startsWith("openrouter/") && !DEAD_MODELS.has(id),
+      )
       return {
         baseURL: BASE,
         apiKey: auth.key,
@@ -233,7 +274,15 @@ export const OpenRouterPlugin = async ({ client } = {}, options) => ({
         },
         async fetch(input, init) {
           const sent = prepare(input, init, { sort: options?.sort })
-          return fetch(sent.url, sent.init)
+          return fetchWithFailover(fetch, sent.url, sent.init, {
+            key: auth.key,
+            candidates,
+            fallbackToHealthy: options?.fallbackToHealthy === true,
+            healthyModelsOnly: options?.healthyModelsOnly === true,
+            modelCooldownMs: options?.modelCooldownMs,
+            maxRetries: options?.maxRetries,
+            client,
+          })
         },
       }
     },
@@ -263,11 +312,14 @@ export const OpenRouterPlugin = async ({ client } = {}, options) => ({
       // (total_credits = 0 on registrar keys), so listing them only invites
       // 402s. openrouter/auto stays because chat routing names it.
       const freeOnly = options?.freeOnly === true
+      const healthyOnly = options?.healthyModelsOnly === true
       const usable = (models) => {
-        if (!freeOnly) return models
+        if (!freeOnly && !healthyOnly) return models
         const out = {}
         for (const [id, model] of Object.entries(models)) {
-          if (model?.free === true || id === "openrouter/auto") out[id] = model
+          if (freeOnly && !(model?.free === true || id === "openrouter/auto")) continue
+          if (healthyOnly && DEAD_MODELS.has(id)) continue
+          out[id] = model
         }
         return out
       }
@@ -307,4 +359,13 @@ export const OpenRouterPlugin = async ({ client } = {}, options) => ({
   },
 })
 
-export const _internal = { PROVIDER, rememberName, parseKeyText, parseKeyEntries, importKeys, clearCatalogCache: () => catalogCache.clear(), clearUsageCache: () => clearUsageCache() }
+export const _internal = {
+  PROVIDER,
+  rememberName,
+  parseKeyText,
+  parseKeyEntries,
+  importKeys,
+  clearCatalogCache: () => catalogCache.clear(),
+  clearUsageCache: () => clearUsageCache(),
+  failover: { stats, snapshotStats, fmtFailover, classify429, pickCandidate, DEAD_MODELS, fetchWithFailover },
+}

@@ -3,3 +3,6 @@
 _bak-doctor*/
 node_modules/
 *.log
+
+run_all_tests.mjs
+

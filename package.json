@@ -1,11 +1,12 @@
 {
   "name": "magpie-openrouter-bulk",
-  "version": "0.3.2",
-  "description": "OpenRouter provider plugin for magpie/OpenCode with batch key import support (based on biyan113/magpie-openrouter)",
+  "version": "0.4.0",
+  "description": "OpenRouter provider plugin for magpie/OpenCode with batch key import + dual-dimension 429 failover (based on biyan113/magpie-openrouter)",
   "type": "module",
   "main": "./index.mjs",
   "files": [
     "index.mjs",
+    "failover.mjs",
     "catalog.mjs",
     "request.mjs",
     "usage.mjs",

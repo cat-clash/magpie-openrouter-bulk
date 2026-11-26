@@ -180,7 +180,7 @@ magpie 的插件登录态存在 `<配置目录>/magpie/plugin-auth.json`（无 B
 ## 测试
 
 ```sh
-npm test          # node --test（32 个测试全过）
+npm test          # node --test（53 个测试全过）
 bun test .        # bun（本机 magpie 自带 bun 亦可）
 ```
 
@@ -188,6 +188,13 @@ bun test .        # bun（本机 magpie 自带 bun 亦可）
 
 ## 更新日志
 
+- **0.4.0**（2026-11-27）
+  - 新增**双维度 429 failover**（`failover.mjs`）：429 响应按 body 特征分类——`free-models-per-day` 判为 key 级（日额度用尽，交 magpie 换账号）、`temporarily rate-limited upstream` 判为模型级（上游限流，插件自动换健康模型重试）
+  - 模型健康状态跟踪：模型级 429 后冷却 60s（或按 `retry-after` / `x-ratelimit-reset`），期间不选；冷却中的模型自动跳过
+  - `options.fallbackToHealthy`：请求点名已知全灭模型（`ling-3.2-flash`、`gemma-4-*`）时直接先改投健康免费模型，省一次必 429 的请求（默认关）
+  - `options.healthyModelsOnly`：模型列表只暴露 9 个实测健康零价模型（默认关）
+  - 429 分类计数与 failover 日志（事件/原因/切换目标）暴露在 provider 诊断接口
+  - 新增 `failover.test.mjs`（21 用例），全量 53 个测试通过
 - **0.3.2**（2026-11-26）
   - 静态兜底模型目录按线上实测刷新：7 个 `:free` → **12 个零价文本模型**（新增 `openrouter/free`、`nemotron-3-ultra-550b-a55b:free`、`nemotron-3-nano-omni-30b-a3b-reasoning:free`、`particle-ai/particle-1:free`、`recursive/flint-v1.0:free`）
   - 新增 `options.freeOnly`：模型列表只列免费号真正可调用的零价模型（默认关闭）
