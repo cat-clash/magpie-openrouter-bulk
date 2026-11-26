@@ -18,20 +18,26 @@ const AUTO = {
   tool_call: true,
 }
 
-// Offline fallback catalog: `openrouter/auto` plus real `:free` variants that
-// OpenRouter served when this list was last refreshed (ids ending in `:free`
-// cost nothing per token). The live /models listing replaces this whole list
-// whenever a key can reach OpenRouter, so this only matters offline, before
-// the first refresh, or for a brand-new install without a key yet.
+// Offline fallback catalog: `openrouter/auto` plus the `:free` / zero-price
+// text models OpenRouter actually served when this list was last refreshed
+// (2026-11-26, 737 models, 21 `:free`, 12 text-chat usable). The live /models
+// listing replaces this whole list whenever a key can reach OpenRouter, so
+// this only matters offline, before the first refresh, or on a fresh install
+// without a key yet.
 const FREE_MODELS = {
   "openrouter/auto": AUTO,
-  "inclusionai/ling-3.2-flash:free": { name: "Ling 3.2 Flash (free)", limit: { context: 1048576, output: 262144 }, tool_call: true, reasoning: true, free: true },
-  "baidu/ernie-5.5-flash-preview:free": { name: "ERNIE 5.5 Flash Preview (free)", limit: { context: 1024000, output: 921600 }, tool_call: true, reasoning: true, free: true },
-  "google/gemma-4-31b-it:free": { name: "Gemma 4 31B (free)", limit: { context: 262144, output: 32768 }, tool_call: true, free: true },
-  "google/gemma-4-26b-a4b-it:free": { name: "Gemma 4 26B A4B (free)", limit: { context: 262144, output: 32768 }, tool_call: true, free: true },
-  "nvidia/nemotron-3.5-lightning:free": { name: "Nemotron 3.5 Lightning (free)", limit: { context: 1000000, output: 65536 }, tool_call: true, free: true },
-  "nvidia/nemotron-3.5-super-vl:free": { name: "Nemotron 3.5 Super VL (free)", limit: { context: 1000000, output: 131072 }, tool_call: true, free: true },
-  "liquid/lfm-3-1.7b:free": { name: "LFM 3 1.7B (free)", limit: { context: 262144, output: 8192 }, tool_call: true, free: true },
+  "baidu/ernie-5.5-flash-preview:free": { name: "Baidu: ERNIE-5.5-Flash-Preview (free)", limit: { context: 1024000, output: 921600 }, tool_call: true, reasoning: true, free: true },
+  "google/gemma-4-26b-a4b-it:free": { name: "Google: Gemma 4 26B A4B (free)", limit: { context: 262144, output: 32768 }, tool_call: true, free: true },
+  "google/gemma-4-31b-it:free": { name: "Google: Gemma 4 31B (free)", limit: { context: 262144, output: 32768 }, tool_call: true, free: true },
+  "inclusionai/ling-3.2-flash:free": { name: "inclusionAI: Ling 3.2 Flash (free)", limit: { context: 1048576, output: 262144 }, tool_call: true, reasoning: true, free: true },
+  "liquid/lfm-3-1.7b:free": { name: "LiquidAI: LFM3-1.7B (free)", limit: { context: 262144, output: 8192 }, tool_call: true, reasoning: true, free: true },
+  "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free": { name: "NVIDIA: Nemotron 3 Nano Omni (free)", limit: { context: 256000, output: 65536 }, tool_call: true, reasoning: true, free: true },
+  "nvidia/nemotron-3-ultra-550b-a55b:free": { name: "NVIDIA: Nemotron 3 Ultra (free)", limit: { context: 1000000, output: 65536 }, tool_call: true, reasoning: true, free: true },
+  "nvidia/nemotron-3.5-lightning:free": { name: "NVIDIA: Nemotron 3.5 Lightning (free)", limit: { context: 1000000, output: 65536 }, tool_call: true, free: true },
+  "nvidia/nemotron-3.5-super-vl:free": { name: "NVIDIA: Nemotron 3.5 Super VL (free)", limit: { context: 1000000, output: 131072 }, tool_call: true, free: true },
+  "openrouter/free": { name: "Free Models Router", limit: { context: 200000 }, tool_call: true, free: true },
+  "particle-ai/particle-1:free": { name: "Particle AI: Particle-1 (free)", limit: { context: 1048576, output: 131072 }, tool_call: true, reasoning: true, free: true },
+  "recursive/flint-v1.0:free": { name: "Recursive: Flint (free)", limit: { context: 262144, output: 235929 }, tool_call: true, reasoning: true, free: true },
 }
 
 // ---- 批量导入（magpie auth.import 扩展点，单次 ≤100）----
@@ -252,7 +258,20 @@ export const OpenRouterPlugin = async ({ client } = {}, options) => ({
   provider: {
     id: PROVIDER,
     async models(provider, { auth } = {}) {
-      if (auth?.type !== "api" || !auth.key) return provider.models
+      // freeOnly keeps just what a free-tier key can actually call: `:free`
+      // models and zero-price routers. Paid models need purchased credits
+      // (total_credits = 0 on registrar keys), so listing them only invites
+      // 402s. openrouter/auto stays because chat routing names it.
+      const freeOnly = options?.freeOnly === true
+      const usable = (models) => {
+        if (!freeOnly) return models
+        const out = {}
+        for (const [id, model] of Object.entries(models)) {
+          if (model?.free === true || id === "openrouter/auto") out[id] = model
+        }
+        return out
+      }
+      if (auth?.type !== "api" || !auth.key) return usable(provider.models)
       const ck = `${options?.output ?? "default"}|${options?.includeAliases === true}`
       const hit = catalogCache.get(ck)
       if (hit && Date.now() - hit.at < CATALOG_TTL) {
@@ -263,7 +282,7 @@ export const OpenRouterPlugin = async ({ client } = {}, options) => ({
           if (err?.signIn === "expired") throw err
           // Offline: the shared catalog is still better than the static list.
         }
-        return { ...hit.models }
+        return { ...usable(hit.models) }
       }
       try {
         const listed = await fetchCatalog(fetch, {
@@ -272,15 +291,17 @@ export const OpenRouterPlugin = async ({ client } = {}, options) => ({
           includeAliases: options?.includeAliases === true,
         })
         if (Object.keys(listed).length === 0) {
-          const fallback = { ...provider.models }
+          const fallback = usable({ ...provider.models })
           fallback[Symbol.for("magpie.fellBack")] = true
           return fallback
         }
+        // Cache the full catalog and filter on the way out, so switching
+        // freeOnly does not refetch /models.
         catalogCache.set(ck, { at: Date.now(), models: listed })
-        return listed
+        return usable(listed)
       } catch (err) {
         if (err?.signIn === "expired") throw err
-        return provider.models
+        return usable(provider.models)
       }
     },
   },

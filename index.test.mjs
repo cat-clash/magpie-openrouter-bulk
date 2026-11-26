@@ -123,6 +123,59 @@ test("models replaces the static list with the live catalog", async () => {
   assert.equal(listed["deepseek/deepseek-v4-flash"].cost.input, 0.15)
 })
 
+test("offline fallback lists the 2026-11-26 free models and keeps the router", async () => {
+  const hooks = await OpenRouterPlugin({})
+  const cfg = {}
+  await hooks.config(cfg)
+  const models = cfg.provider[PROVIDER].models
+  assert.ok(models["openrouter/auto"], "router kept")
+  assert.ok(models["openrouter/free"], "zero-price router kept")
+  assert.ok(models["nvidia/nemotron-3-ultra-550b-a55b:free"], "new free model kept")
+  const free = Object.entries(models).filter(([, m]) => m.free === true)
+  assert.equal(free.length, 12, "12 usable free text models (11 :free + openrouter/free)")
+  assert.ok(Object.keys(models).every((id) => id === "openrouter/auto" || id.endsWith(":free") || id === "openrouter/free"))
+})
+
+test("freeOnly filters the catalog to models a free-tier key can call", async () => {
+  _internal.clearCatalogCache()
+  const hooks = await OpenRouterPlugin({}, { output: "text", freeOnly: true })
+  const provider = { models: { "openrouter/auto": { name: "auto" } } }
+  const listed = await withFetch(async (url) => {
+    if (String(url).endsWith("/key")) return json({ data: { name: "work" } })
+    return json({
+      data: [
+        {
+          id: "deepseek/deepseek-v4-flash",
+          architecture: { output_modalities: ["text"] },
+          pricing: { prompt: "0.00000015", completion: "0.0000006" },
+        },
+        {
+          id: "google/gemma-4-31b-it:free",
+          architecture: { output_modalities: ["text"] },
+          pricing: { prompt: "0", completion: "0" },
+        },
+        {
+          id: "openrouter/free",
+          architecture: { output_modalities: ["text"] },
+          pricing: { prompt: "0", completion: "0" },
+        },
+      ],
+      links: { next: null },
+    })
+  }, () => hooks.provider.models(provider, { auth: { type: "api", key: "sk-or-v1-x" } }))
+  assert.deepEqual(Object.keys(listed).sort(), ["google/gemma-4-31b-it:free", "openrouter/free"])
+  assert.equal(listed["google/gemma-4-31b-it:free"].free, true)
+
+  // offline path also filtered, router preserved
+  const offline = await OpenRouterPlugin({}, { freeOnly: true })
+  const fallback = await offline.provider.models(
+    { models: { "openrouter/auto": { name: "auto" }, "google/gemma-4-31b-it:free": { name: "g", free: true }, "deepseek/x": { name: "x" } } },
+    {},
+  )
+  assert.deepEqual(Object.keys(fallback).sort(), ["google/gemma-4-31b-it:free", "openrouter/auto"])
+  _internal.clearCatalogCache()
+})
+
 test("catalog is shared across accounts within the TTL", async () => {
   _internal.clearCatalogCache()
   const hooks = await OpenRouterPlugin({}, { output: "text" })

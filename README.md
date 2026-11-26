@@ -83,6 +83,54 @@ magpie accounts import openrouter-live api_keys.json --yes
 - **partial 容错**：某把 key 瞬时失败时保留上次成功快照并标 `stale`（带时间戳），不再让整体 usage 报错
 - **砍掉 `/credits`**：免费层 key 的 `/credits` 无意义（余额 = key limit 已在 `/key` 里），正常路径只打 `/key`，每账号请求数减半
 
+### 「积分 / 余额」到底是什么
+
+注册号是 **Free tier** 账号（`is_free_tier: true`、`GET /credits` 返回 `total_credits: 0`）。两个数字别混：
+
+- **`limit: 100` / 「key limit · $0.00 / $100.00」**：这把 key 的**消费上限**（OpenRouter 的 key guardrail，USD）。它是天花板，不是余额——账号没有充过值，`total_credits` 就是 0，这个 $100 不会变成可用额度。
+- **余额**：真实可用余额 = 已充值 credits − 已消耗。免费号是 `$0.00`；插件在没有 credits 时回退显示 `limit_remaining`（= $100 上限剩余），所以看起来像「$100 余额」，实际是「还没花掉的额度上限」。
+- **credits 花在哪**：只有**付费模型**按 token 扣 credits（prompt/completion 单价见模型 `pricing`）。`GET /key`、`GET /credits`、`GET /models` 这些探测不消耗 credits。
+- **免费额度**：`:free` 模型不扣 credits，只受 `free_model_daily_requests` 限制——每账号 **50 次/天**（UTC 重置），平台另有 20 请求/分钟。
+
+结论：免费号能用什么，只取决于模型是否零价（`:free` 后缀或零价路由），与那 $100 无关。
+
+## 可用模型盘点（2026-11-26 实测）
+
+线上 `/models` 全量 **737** 个模型（插件默认只收文本/决策类，magpie 里显示 459 个）：
+
+| 类别 | 数量 | 免费号能否直接调用 |
+| --- | --- | --- |
+| 全部模型 | 737 | — |
+| `:free` 后缀 | 21 | 仅文本类可用；视频/语音/embedding/rerank 不是聊天模型 |
+| 零价文本（非 `:free`） | 1（`openrouter/free` 路由器） | ✅ |
+| **文本聊天可用的免费模型** | **12** | ✅ |
+| 付费模型 | 627 | ❌ 需要充值 credits，否则 402 insufficient credits |
+
+> 实测：免费号调付费模型返回 402；`GET /credits` = `{total_credits: 0, total_usage: 0}`。
+
+### 当前可用（零价、文本、可直接聊天）的 12 个模型
+
+| 模型 | 上下文 | 最大输出 | tools |
+| --- | --- | --- | --- |
+| `baidu/ernie-5.5-flash-preview:free` | 1,024,000 | 921,600 | ✓ |
+| `google/gemma-4-26b-a4b-it:free` | 262,144 | 32,768 | ✓ |
+| `google/gemma-4-31b-it:free` | 262,144 | 32,768 | ✓ |
+| `inclusionai/ling-3.2-flash:free` | 1,048,576 | 262,144 | ✓ |
+| `liquid/lfm-3-1.7b:free` | 262,144 | 8,192 | ✓ |
+| `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free` | 256,000 | 65,536 | ✓ |
+| `nvidia/nemotron-3-ultra-550b-a55b:free` | 1,000,000 | 65,536 | ✓ |
+| `nvidia/nemotron-3.5-lightning:free` | 1,000,000 | 65,536 | ✓ |
+| `nvidia/nemotron-3.5-super-vl:free` | 1,000,000 | 131,072 | ✓ |
+| `openrouter/free` | 200,000 | — | ✓ |
+| `particle-ai/particle-1:free` | 1,048,576 | 131,072 | ✓ |
+| `recursive/flint-v1.0:free` | 262,144 | 235,929 | ✓ |
+
+另有 21 个 `:free` 里的 10 个非聊天模型：视频（`google/veo-3.1`、`minimax/hailuo-3`、`bytedance/seedance-*`、`x-ai/grok-imagine-video` 等）、语音（`fish-audio/s2.1-pro-free:free`、`heygen/heygen-voice-1-turbo:free`）、embedding（`nvidia/nemotron-3-embed-1b:free` 等）——插件按 `output_modalities` 过滤，不会进聊天模型列表。
+
+> 想要模型列表只显示这 12 个：设 `options.freeOnly: true`（默认 false，仍列全量 459 个文本模型）。
+
+插件静态兜底目录收录了上述 12 个 + `openrouter/auto`（共 13 项）；登录后以 `/models` 实时目录为准。
+
 ## OpenRouter 官网调研要点
 
 - **Key 格式**：`sk-or-v1-` + 64 位小写十六进制，共 73 字符
@@ -92,24 +140,6 @@ magpie accounts import openrouter-live api_keys.json --yes
 - **限流**：key 管理（POST/PATCH/DELETE `/keys`）默认 10,000 次/天；`GET /key`、`/credits`、`GET /keys` 有按 IP 的突发限额（无 `X-RateLimit-*` 头，429 时指数退避重试）
 - **402/403 额度类错误**：`error.metadata.limit_source` 区分 `openrouter_key_limit` / `openrouter_credits` / in-flight 预算
 - `GET /api/v1/models` 为公开端点（无需鉴权），支持 `limit` / `output_modalities` 参数与 `links.next` 分页
-
-### 当前真实存在的文本 `:free` 模型（2026-11-26 实测，共 11 个）
-
-| 模型 | 上下文 | 最大输出 | tools |
-| --- | --- | --- | --- |
-| `inclusionai/ling-3.2-flash:free` | 1,048,576 | 262,144 | ✓ |
-| `baidu/ernie-5.5-flash-preview:free` | 1,024,000 | 921,600 | ✓ |
-| `particle-ai/particle-1:free` | 1,048,576 | 131,072 | ✓ |
-| `nvidia/nemotron-3-ultra-550b-a55b:free` | 1,000,000 | 65,536 | ✓ |
-| `nvidia/nemotron-3.5-super-vl:free` | 1,000,000 | 131,072 | ✓ |
-| `nvidia/nemotron-3.5-lightning:free` | 1,000,000 | 65,536 | ✓ |
-| `recursive/flint-v1.0:free` | 262,144 | 235,929 | ✓ |
-| `google/gemma-4-31b-it:free` | 262,144 | 32,768 | ✓ |
-| `google/gemma-4-26b-a4b-it:free` | 262,144 | 32,768 | ✓ |
-| `liquid/lfm-3-1.7b:free` | 262,144 | 8,192 | ✓ |
-| `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free` | 256,000 | 65,536 | ✓ |
-
-插件静态兜底目录收录了其中 7 个（见 `index.mjs` 的 `FREE_MODELS`）；登录后以 `/models` 实时目录为准。
 
 ## 直写 plugin-auth.json（兜底路径）
 
@@ -140,6 +170,7 @@ magpie 的插件登录态存在 `<配置目录>/magpie/plugin-auth.json`（无 B
 | `output` | `default`/`text`/`all` |
 | `includeAliases` | `true` 时保留 `~` 别名 |
 | `verifyImport` | `false` 时 `auth.import` 跳过逐 key 在线验证 |
+| `freeOnly` | `true` 时模型列表只保留免费号可用的零价模型（默认 `false`，列全量文本模型） |
 
 ## 行为说明
 
@@ -149,7 +180,7 @@ magpie 的插件登录态存在 `<配置目录>/magpie/plugin-auth.json`（无 B
 ## 测试
 
 ```sh
-npm test          # node --test（148 个断言全过）
+npm test          # node --test（32 个测试全过）
 bun test .        # bun（本机 magpie 自带 bun 亦可）
 ```
 
@@ -157,6 +188,10 @@ bun test .        # bun（本机 magpie 自带 bun 亦可）
 
 ## 更新日志
 
+- **0.3.2**（2026-11-26）
+  - 静态兜底模型目录按线上实测刷新：7 个 `:free` → **12 个零价文本模型**（新增 `openrouter/free`、`nemotron-3-ultra-550b-a55b:free`、`nemotron-3-nano-omni-30b-a3b-reasoning:free`、`particle-ai/particle-1:free`、`recursive/flint-v1.0:free`）
+  - 新增 `options.freeOnly`：模型列表只列免费号真正可调用的零价模型（默认关闭）
+  - README 补齐「积分 / 余额」语义：$100 是 key 消费上限（guardrail），不是余额；免费号 `total_credits = 0`，付费模型 402
 - **0.3.1**（2026-11-26）
   - 修复批量账号 quota 拉取超时（`context deadline exceeded`）：全局并发闸（3）+ 0–300ms 抖动 + 8s 超时 + 429/5xx 指数退避重试（500/1500/3000ms）
   - usage 结果跨账号缓存：成功 10 分钟、失败 60 秒；瞬时失败保留上次成功快照标 `stale`
