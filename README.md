@@ -188,6 +188,11 @@ bun test .        # bun（本机 magpie 自带 bun 亦可）
 
 ## 更新日志
 
+- **0.5.0**（2026-11-27）
+  - 补 `magpie.name = "OpenRouter"`（此前 GUI 里 provider 名为空）
+  - 补 `optionsExample`：`fallbackToHealthy` / `healthyModelsOnly` / `freeOnly` / `providerSort` 四个开关的中文说明
+  - 补 `repository` / `homepage` / `files`（含 `panel`）
+  - 新增 `panel/`（账号池面板 + 一键刷新）：代码完成，**magpie 未加载本地目录 spec 的 panels**，已从 `package.json` 移除声明，详见 [`panel/README.md`](panel/README.md)
 - **0.4.0**（2026-11-27）
   - 新增**双维度 429 failover**（`failover.mjs`）：429 响应按 body 特征分类——`free-models-per-day` 判为 key 级（日额度用尽，交 magpie 换账号）、`temporarily rate-limited upstream` 判为模型级（上游限流，插件自动换健康模型重试）
   - 模型健康状态跟踪：模型级 429 后冷却 60s（或按 `retry-after` / `x-ratelimit-reset`），期间不选；冷却中的模型自动跳过

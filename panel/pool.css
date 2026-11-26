@@ -1,0 +1,115 @@
+/* OpenRouter 账号池面板样式 — 跟随 magpie 主题变量，无硬编码配色 */
+.pool {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font: inherit;
+}
+
+.pool-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.pool-label {
+  font-weight: 600;
+  color: var(--fg, inherit);
+}
+
+.pool-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--muted, #6b7280);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pool-btn {
+  font: inherit;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border, #d4d4d8);
+  background: var(--btn-bg, transparent);
+  color: inherit;
+  cursor: pointer;
+}
+
+.pool-btn:hover { border-color: var(--accent, #52525b); }
+.pool-btn:disabled { opacity: .55; cursor: default; }
+
+.pool-primary {
+  border-color: var(--accent, #52525b);
+  font-weight: 600;
+}
+
+.pool-status {
+  margin: 0;
+  min-height: 1em;
+  font-size: .86em;
+  color: var(--muted, #6b7280);
+}
+
+.pool-details { margin-top: 2px; }
+.pool-details summary {
+  cursor: pointer;
+  font-size: .9em;
+  color: var(--muted, #6b7280);
+  user-select: none;
+}
+
+.pool-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.pool-card {
+  border: 1px solid var(--border, #d4d4d8);
+  border-radius: 8px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: .82em;
+}
+
+.pool-card.spent { opacity: .62; }
+
+.pool-card-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.pool-bar {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--border, #e4e4e7);
+  overflow: hidden;
+}
+
+.pool-bar i {
+  display: block;
+  height: 100%;
+  background: var(--accent, #52525b);
+  border-radius: 999px;
+}
+
+.pool-card-meta {
+  color: var(--muted, #6b7280);
+  font-variant-numeric: tabular-nums;
+}
+
+.pool-note {
+  margin: 8px 0 0;
+  font-size: .78em;
+  color: var(--muted, #6b7280);
+}
