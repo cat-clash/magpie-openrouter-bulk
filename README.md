@@ -158,6 +158,24 @@ magpie 的插件登录态存在 `<配置目录>/magpie/plugin-auth.json`（无 B
 - 带项目 `registrar/magpie_importer.py` 可以自动做这件事（自动备份、幂等去重）
 - 文件必须无 BOM；带 BOM 会被 magpie 判定无法解析并改名备份
 
+## 代码结构
+
+`index.mjs` 只做装配（<3KB），钩子实现在 `src/` 下，改哪一块就去看哪个文件：
+
+| 文件 | 职责 |
+| --- | --- |
+| `index.mjs` | 装配：把六个钩子拼成插件对象；只导出 `OpenRouterPlugin` 与 `_internal` |
+| `src/context.mjs` | 常量与静态表：`PROVIDER` / `BASE` / `CATALOG_TTL` / `FREE_MODELS` / `DEAD_MODELS` / `HEALTHY_MODELS` / 导入正则与超时 |
+| `src/hooks/config.mjs` | `config` 钩子：provider 声明 + 静态模型表 |
+| `src/hooks/options.mjs` | `auth.options`：GUI 开关与 `importFrom` 文案 |
+| `src/hooks/import.mjs` | `auth.import`：`parseKeyEntries` / `parseKeyText` / `verifyKey` / `importKeys` |
+| `src/hooks/loader.mjs` | `auth.loader`：`prepare()` + 双维度 429 failover |
+| `src/hooks/usage.mjs` | `auth.usage`：配额窗口（并发闸 3 + 缓存）与账号自动命名 |
+| `src/hooks/models.mjs` | `provider.models`：动态目录 + 静态兜底 + 目录缓存 |
+| `failover.mjs` / `catalog.mjs` / `request.mjs` / `usage.mjs` | 根目录底层实现（import 路径不变，`DEAD_MODELS` 事实来源已上移到 `src/context.mjs` 并由 `failover.mjs` 再导出） |
+
+> 入口**只能**导出 `OpenRouterPlugin` 和 `_internal` 两个符号 —— 多导出一个函数，magpie 会把它当成第二个插件。
+
 ## 插件选项
 
 写在 `plugins.json` 对应项的 `options`，或 `magpie plugin options magpie-openrouter-bulk '<json>'`：
@@ -188,6 +206,11 @@ bun test .        # bun（本机 magpie 自带 bun 亦可）
 
 ## 更新日志
 
+- **未发布 · 模块化重构**（2026-11-27）
+  - `index.mjs` 从 16KB 集中式拆成 **装配入口 2.6KB + `src/` 分层**（`src/context.mjs` 与 6 个 `src/hooks/*.mjs`），钩子实现与声明分离，改一块只看一个文件
+  - 常量/静态表统一到 `src/context.mjs`：`PROVIDER`、`BASE`、`CATALOG_TTL`、`FREE_MODELS`、`DEAD_MODELS`、`HEALTHY_MODELS`、导入正则与超时；`failover.mjs` 改为从 context 取 `DEAD_MODELS` 并原样再导出（老 `import ... from "./failover.mjs"` 调用点不受影响）
+  - **行为零变化**：导出契约仍是 `OpenRouterPlugin` + `_internal` 两个符号，钩子形状、日志、缓存语义完全一致；全量 `53 passed`（含 failover 21 例）
+  - `package.json` 的 `files` 加 `src`（否则发布包缺 hook 文件，安装即崩）
 - **0.5.0**（2026-11-27）
   - 补 `magpie.name = "OpenRouter"`（此前 GUI 里 provider 名为空）
   - 补 `optionsExample`：`fallbackToHealthy` / `healthyModelsOnly` / `freeOnly` / `providerSort` 四个开关的中文说明

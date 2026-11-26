@@ -11,14 +11,11 @@
 //   2. 模型级：body 含 "temporarily rate-limited upstream"（上游供应商限流），
 //      换 key 无效，必须换模型。这是插件自己处理的维度。
 
-export const PROVIDER = "openrouter-live"
+import { DEAD_MODELS, PROVIDER } from "./src/context.mjs"
 
-// 2026-11-26 实测：模型级全灭（3 把 key 全 429 upstream）
-export const DEAD_MODELS = new Set([
-  "inclusionai/ling-3.2-flash:free",
-  "google/gemma-4-31b-it:free",
-  "google/gemma-4-26b-a4b-it:free",
-])
+// DEAD_MODELS 的事实来源已上移到 src/context.mjs（重构后统一常量表）；这里原样再导出，
+// 让 `import { DEAD_MODELS } from "./failover.mjs"` 的老调用点继续可用。
+export { DEAD_MODELS, PROVIDER }
 
 // 模型级 429 后的默认 cooldown（秒）；优先用响应里的 retry-after / x-ratelimit-reset。
 export const MODEL_COOLDOWN_MS = 60 * 1000

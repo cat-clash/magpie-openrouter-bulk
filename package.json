@@ -6,6 +6,7 @@
   "main": "./index.mjs",
   "files": [
     "index.mjs",
+    "src",
     "failover.mjs",
     "catalog.mjs",
     "request.mjs",
