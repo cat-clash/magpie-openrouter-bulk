@@ -67,10 +67,11 @@ test("loader signs chat requests and usage names the account from the key", asyn
     return json({ data: { name: "work", is_free_tier: false, limit: null, usage_daily: 0 } })
   }, () => hooks.auth.usage(async () => ({ type: "api", key: "sk-or-v1-secret" })))
   assert.equal(report.user, "work")
-  assert.equal(saved.length, 1)
-  assert.equal(saved[0].body.metadata.email, "work")
-  assert.equal(saved[0].body.key, "sk-or-v1-secret")
-  assert.equal(saved[0].path.id, PROVIDER)
+  // ⚠ 不变量：usage 绝不能改写账号记录。
+  //   client.auth.set 的 body 就是整条账号记录，用不完整的数据写回会把 key 抹掉
+  //   （2026-11-27 实测事故：每刷一次 quota 丢几把 key，58 → 55）。
+  //   账号显示名改由 magpie 官方 `magpie accounts alias` 维护。
+  assert.equal(saved.length, 0)
 })
 
 test("models keeps the previous list when the catalog cannot be read", async () => {

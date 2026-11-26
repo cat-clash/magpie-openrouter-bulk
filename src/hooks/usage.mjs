@@ -34,12 +34,14 @@ async function restorePool() {
   }
 }
 
+// ⚠ 默认**不再**用 client.auth.set 改写账号的 metadata。
+//   client.auth.set 的 body 就是整条账号记录；一旦传入的对象不完整（缺 key 或缺
+//   metadata 以外的字段），magpie 会用它整体替换，把 key 抹掉。
+//   账号显示名改由 magpie 官方的 `magpie accounts alias` 维护（providers.json 的
+//   accountNames，58 个账号已全部设好别名），完全不碰账号记录，零风险。
 export async function rememberName(client, auth, name) {
-  if (!name || auth?.metadata?.email === name || typeof client?.auth?.set !== "function") return
-  await client.auth.set({
-    path: { id: PROVIDER },
-    body: { ...auth, metadata: { ...(auth.metadata ?? {}), email: name } },
-  })
+  // 保留导出以兼容测试；实现改为 no-op。
+  return
 }
 
 export function usageHook(client, pacer) {
@@ -56,12 +58,13 @@ export function usageHook(client, pacer) {
     }
 
     // 面板快照：并入账号池并落盘（失败不影响配额返回）
+    // ⚠ 只写文件，绝不碰 client.auth.set —— 用不完整的 body 调它会把账号的 key 抹掉
+    //   （2026-11-27 实测事故：每刷一次 quota 就丢几把 key，58 → 55）。
     try {
       await restorePool()
       const user = report.user || auth?.metadata?.email || "?"
       pool.set(user, poolEntry(user, report))
       await writePoolState([...pool.values()])
-      await pushSnapshotToOptions(client)
     } catch {
       // 面板只是锦上添花
     }
@@ -82,42 +85,8 @@ export function poolSnapshot() {
   return [...pool.values()]
 }
 
-// ---------- 把快照也写进插件选项（面板无文件依赖的兜底数据源） ----------
-//
-// 面板跑在 sandbox 里，若 magpie 不 serve 同目录的 pool-state.js，
-// 面板就读不到 globalThis.__OR_POOL__。这时用 magpie.options.get() 拿
-// options.poolSnapshot —— 所以每次池变化后写一次选项。
-//
-// ⚠ options.set 是整份替换且一秒最多一次：节流 5 秒，且只在内容真变了才写。
-let lastPushAt = 0
-let lastSignature = ""
-
-async function pushSnapshotToOptions(client) {
-  if (typeof client?.auth?.set !== "function") return
-  const nowMs = Date.now()
-  if (nowMs - lastPushAt < 5000) return
-  const accounts = [...pool.values()]
-  const signature = accounts.map((a) => `${a.user}:${a.remaining}`).join("|")
-  if (signature === lastSignature) return
-  lastPushAt = nowMs
-  lastSignature = signature
-  try {
-    const got = await client.auth.get({ path: { id: PROVIDER } })
-    const current = (got && got.body) || got || {}
-    await client.auth.set({
-      path: { id: PROVIDER },
-      body: {
-        ...current,
-        options: {
-          ...(current.options ?? {}),
-          poolSnapshot: {
-            at: new Date().toISOString().replace("T", " ").slice(0, 19),
-            accounts,
-          },
-        },
-      },
-    })
-  } catch {
-    // 选项写入失败不影响配额
-  }
-}
+// ⚠ 曾经这里有一个 pushSnapshotToOptions()：为了给面板一个「无文件依赖」的数据源，
+//   它用 client.auth.set 把快照写进 provider 选项。**这是严重错误**：
+//   client.auth.set 的 body 是整个账号记录，用不完整的数据写回会把该账号的
+//   key / metadata 抹掉。2026-11-27 实测：每刷新一次 quota 就丢几把 key（58 → 55）。
+//   面板数据只走 pool-state.js 文件；绝不为了面板去写账号记录。
