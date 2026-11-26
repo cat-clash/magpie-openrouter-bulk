@@ -228,6 +228,12 @@ bun test .        # bun（本机 magpie 自带 bun 亦可）
 
 ## 更新日志
 
+- **0.6.1**（2026-11-27）⚠ 严重修复
+  - **修复：usage 钩子不再改写账号记录。** 之前为了给面板供数据，`pushSnapshotToOptions()` 调用 `client.auth.set` 并传入不完整的 body —— 而 `client.auth.set` 的 body 就是**整条账号记录**，于是 magpie 用它整体替换，把该账号的 `key` 抹掉。
+    实测损失：连续两次 `magpie quota refresh` 后，带合法 key 的账号 **58 → 55**，GUI 里账号退化成 `Signed in (hash)` + `OpenRouter has no key for this account`。
+  - `rememberName()` 同样改为 no-op（理由相同）。账号显示名统一交给 magpie 官方的 `magpie accounts alias`（写 `providers.json` 的 `accountNames`，完全不碰账号记录）。
+  - **不变量**：插件永不写账号记录。面板数据只走 `panel/pool-state.js`。
+  - 测试同步改为断言「usage 不得调用 auth.set」（`saved.length === 0`）。
 - **0.6.0**（2026-11-27）
   - **模块化重构**：`index.mjs` 16KB → 3.4KB（只做装配），钩子拆到 `src/hooks/`（config / options / import / loader / usage / models / poolstate），常量与静态表在 `src/context.mjs`；行为零变化
   - **请求节奏控制**（`src/pacing.mjs`）：每 key 最小间隔、免费模型 RPM 滑动窗口（默认 20/min）、日额度耗尽短路（`dailyGuard`）
