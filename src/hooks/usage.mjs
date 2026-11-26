@@ -17,11 +17,17 @@ export async function rememberName(client, auth, name) {
   })
 }
 
-export function usageHook(client) {
+export function usageHook(client, pacer) {
   return async (getAuth) => {
     const auth = await getAuth()
     if (auth?.type !== "api" || !auth.key) return { error: "OpenRouter has no key for this account", windows: [] }
     const report = await readUsageCached(fetch, auth.key)
+    // 把「free models」窗口的剩余额度喂给节奏闸：剩 0 时 loader 直接短路不发请求。
+    try {
+      pacer?.noteUsage?.(auth.key, report)
+    } catch {
+      // 节奏闸是可选增强，喂数失败不影响配额展示。
+    }
     if (report.user) {
       try {
         await rememberName(client, auth, report.user)

@@ -189,6 +189,28 @@ magpie 的插件登录态存在 `<配置目录>/magpie/plugin-auth.json`（无 B
 | `includeAliases` | `true` 时保留 `~` 别名 |
 | `verifyImport` | `false` 时 `auth.import` 跳过逐 key 在线验证 |
 | `freeOnly` | `true` 时模型列表只保留免费号可用的零价模型（默认 `false`，列全量文本模型） |
+| `requestIntervalMs` | 同一把 key 相邻两次请求的最小间隔，默认 `0`（不延迟） |
+| `freeRpmLimit` | 免费模型每分钟请求上限，默认 `20`（平台硬限）；`0` 关闭窗口 |
+| `rpmScope` | `key`（默认，每 key 一份窗口，与平台语义一致）/ `global`（所有账号共用一份） |
+| `dailyGuard` | 默认 `true`：最近一次 `/key` 快照显示免费日额度剩 0 时，请求直接短路成 key 级 429，交给 magpie 换账号 |
+
+### 请求节奏控制（`src/pacing.mjs`）
+
+三件事各自独立、可单独关掉，默认配置下**行为与 0.5.0 一致**（`requestIntervalMs=0` 不引入任何延迟）：
+
+1. **间隔闸** `requestIntervalMs`：同 key 相邻两次放行的最小间隔，摊平突发。
+2. **分钟配额滑动窗口** `freeRpmLimit` + `windowMs`（默认 60s）：用**滑动**窗口而非固定窗口——固定窗口在边界会放过 2×限制。超出的请求同步占位后排队到最早一笔滑出窗口。
+3. **日额度短路** `dailyGuard`：`:free` 模型每 key 每天 50 次（UTC 0 点重置）。`auth.usage` 每次读 `/key` 都把 `free_model_daily_requests` 剩余额度喂给节奏闸；剩 0 且未到重置时刻时，loader **一个字节都不发**，直接返回合成的 key 级 429（body 含 `free-models-per-day`）让 magpie 换账号。
+
+并发安全：`take()` 的占位是**同步完成**的（JS 单线程原子），之后才 `await` 睡眠，所以并发调用方按调用顺序排在一条时间轴上，窗口内放行数严格不超配额。429 后 `refund()` 把刚占的配额退回，失败不吃自己的额度。
+
+```js
+import { createPacer } from "./src/pacing.mjs"
+const pacer = createPacer({ requestIntervalMs: 800, freeRpmLimit: 20 })
+const ticket = await pacer.take(key)  // { allowed, waitMs } 或 { allowed:false, reason:"daily-exhausted" }
+pacer.refund(key)                     // 429 后归还配额
+pacer.snapshot()                      // { used, remaining, perBucket, daily, counters }
+```
 
 ## 行为说明
 
@@ -198,7 +220,7 @@ magpie 的插件登录态存在 `<配置目录>/magpie/plugin-auth.json`（无 B
 ## 测试
 
 ```sh
-npm test          # node --test（53 个测试全过）
+npm test          # node --test（64 个测试全过）
 bun test .        # bun（本机 magpie 自带 bun 亦可）
 ```
 
@@ -206,6 +228,14 @@ bun test .        # bun（本机 magpie 自带 bun 亦可）
 
 ## 更新日志
 
+- **未发布 · 请求节奏控制**（2026-11-27）
+  - 新增 `src/pacing.mjs`：`createPacer()` → `{ take, refund, noteUsage, snapshot }`，三件事各自独立可关
+  - 最小请求间隔 `requestIntervalMs`（默认 0 = 不延迟，保持原行为）
+  - 免费模型分钟配额滑动窗口 `freeRpmLimit`（默认 20，按 key 各算；`rpmScope=global` 可改成全局共用）
+  - 日额度短路 `dailyGuard`（默认开）：读 `/key` 的 `free_model_daily_requests` 剩余额度，剩 0 时 loader 直接返回合成 key 级 429、**不发上游请求**，省一次必然失败的调用
+  - loader 接线：请求前 `pacer.take(key)`、429 后 `pacer.refund(key)`；`auth.usage` 每次读 `/key` 顺带喂日额度快照
+  - GUI 选项补 `requestIntervalMs` / `freeRpmLimit` / `dailyGuard` 三个开关的中文说明
+  - 新增 `src/pacing.test.mjs`（11 例：默认零延迟、间隔闸、滑动窗口、日额度短路、重置恢复、refund、snapshot、并发占位、全局作用域、loader 接线），全量 **64 passed**
 - **未发布 · 模块化重构**（2026-11-27）
   - `index.mjs` 从 16KB 集中式拆成 **装配入口 2.6KB + `src/` 分层**（`src/context.mjs` 与 6 个 `src/hooks/*.mjs`），钩子实现与声明分离，改一块只看一个文件
   - 常量/静态表统一到 `src/context.mjs`：`PROVIDER`、`BASE`、`CATALOG_TTL`、`FREE_MODELS`、`DEAD_MODELS`、`HEALTHY_MODELS`、导入正则与超时；`failover.mjs` 改为从 context 取 `DEAD_MODELS` 并原样再导出（老 `import ... from "./failover.mjs"` 调用点不受影响）

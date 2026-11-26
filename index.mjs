@@ -32,28 +32,45 @@ import { clearCatalogCache, modelsHook } from "./src/hooks/models.mjs"
 import { IMPORT_FROM, IMPORT_FROMS, authOptions } from "./src/hooks/options.mjs"
 import { rememberName, usageHook } from "./src/hooks/usage.mjs"
 import { HEALTHY_MODELS, PROVIDER } from "./src/context.mjs"
+import { createPacer } from "./src/pacing.mjs"
 
-export const OpenRouterPlugin = async ({ client } = {}, options) => ({
-  config: configHook(),
+// 节奏闸按插件实例建一份：选项来自 magpie 的 input.magpie.options。
+// 默认 requestIntervalMs=0、freeRpmLimit=20（每 key 20/分钟，与平台免费限一致）、
+// dailyGuard=true —— 只有「日额度真剩 0」时才会拦下请求，正常路径零延迟。
+function pacerFromOptions(options) {
+  return createPacer({
+    requestIntervalMs: options?.requestIntervalMs,
+    freeRpmLimit: options?.freeRpmLimit,
+    rpmScope: options?.rpmScope,
+    dailyGuard: options?.dailyGuard,
+    windowMs: options?.pacingWindowMs,
+  })
+}
 
-  auth: {
-    provider: PROVIDER,
-    icon: "https://cdn.simpleicons.org/openrouter",
-    maxConcurrency: 8,
-    methods: [{ type: "api", label: "OpenRouter API key", placeholder: "sk-or-v1-…" }],
-    options: authOptions(),
-    importFrom: IMPORT_FROM,
-    importFroms: IMPORT_FROMS,
-    import: importHook(options),
-    loader: loaderHook(client, options),
-    usage: usageHook(client),
-  },
+export const OpenRouterPlugin = async ({ client } = {}, options) => {
+  const pacer = pacerFromOptions(options)
+  return {
+    config: configHook(),
 
-  provider: {
-    id: PROVIDER,
-    models: modelsHook(options),
-  },
-})
+    auth: {
+      provider: PROVIDER,
+      icon: "https://cdn.simpleicons.org/openrouter",
+      maxConcurrency: 8,
+      methods: [{ type: "api", label: "OpenRouter API key", placeholder: "sk-or-v1-…" }],
+      options: authOptions(),
+      importFrom: IMPORT_FROM,
+      importFroms: IMPORT_FROMS,
+      import: importHook(options),
+      loader: loaderHook(client, options, pacer),
+      usage: usageHook(client, pacer),
+    },
+
+    provider: {
+      id: PROVIDER,
+      models: modelsHook(options),
+    },
+  }
+}
 
 // 供测试与诊断引用（⚠ 入口只放一个插件函数，其余都塞在 _internal 里）
 export const _internal = {
@@ -65,5 +82,6 @@ export const _internal = {
   importKeys,
   clearCatalogCache,
   clearUsageCache: () => clearUsageCache(),
+  createPacer,
   failover: { stats, snapshotStats, fmtFailover, classify429, pickCandidate, DEAD_MODELS, fetchWithFailover },
 }

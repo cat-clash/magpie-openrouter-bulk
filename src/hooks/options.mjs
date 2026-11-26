@@ -29,6 +29,42 @@ export function authOptions() {
       },
       placement: "top",
     },
+    {
+      key: "requestIntervalMs",
+      label: "同 key 最小请求间隔（毫秒）",
+      description:
+        "同一把 key 相邻两次请求的最小间隔。默认 0 = 不延迟（与 0.5.0 行为一致）。设成 800 这类值可把突发流量摊平，降低被上游风控的概率。",
+      default: 0,
+      labels: { zh: "同 key 最小请求间隔（毫秒）" },
+      descriptions: {
+        zh: "同一把 key 相邻两次请求的最小间隔。默认 0 = 不延迟。设成 800 这类值可把突发流量摊平。",
+      },
+      placement: "top",
+    },
+    {
+      key: "freeRpmLimit",
+      label: "免费模型每分钟请求上限",
+      description:
+        "OpenRouter 免费模型的平台硬限是 20 请求/分钟。插件用滑动窗口把请求排队在额度内（默认每 key 20）。设 0 关闭窗口。",
+      default: 20,
+      labels: { zh: "免费模型每分钟请求上限" },
+      descriptions: {
+        zh: "免费模型每分钟请求上限（默认 20，按 key 各自计算）。插件用滑动窗口把请求排队在额度内；设 0 关闭。",
+      },
+      placement: "top",
+    },
+    {
+      key: "dailyGuard",
+      label: "日额度用尽时直接不发请求",
+      description:
+        "开启后（默认），若最近一次 /key 快照显示 free_model_daily_requests 剩余 0，请求直接短路成 key 级 429，交给 magpie 换账号，省掉一次必然失败的上游请求。",
+      default: true,
+      labels: { zh: "日额度用尽时直接不发请求" },
+      descriptions: {
+        zh: "开启后（默认），若最近一次 /key 快照显示免费日额度剩余 0，请求直接短路，交给 magpie 换账号。",
+      },
+      placement: "top",
+    },
   ]
 }
 

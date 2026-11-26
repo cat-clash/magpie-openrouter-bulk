@@ -12,7 +12,29 @@ import { BASE, failoverCandidates } from "../context.mjs"
 import { fetchWithFailover } from "../../failover.mjs"
 import { prepare } from "../../request.mjs"
 
-export function loaderHook(client, options) {
+// guardResponse 把本地日额度短路翻译成**合成的 key 级 429**：body 里带
+// `free-models-per-day`（classify429 判为 key 级），magpie 收到后会把该账号 rest 到
+// 重置时刻并换下一个账号 —— 与被上游真拒的效果一致，但省掉一次必然 429 的请求。
+function guardResponse(ticket) {
+  const resetsAt = ticket?.resetsAt ? new Date(ticket.resetsAt).toISOString() : undefined
+  const body = JSON.stringify({
+    error: {
+      code: 429,
+      message: "Rate limit exceeded: free-models-per-day. Local daily guard in magpie-openrouter-bulk.",
+      metadata: {
+        source: "magpie-openrouter-bulk/pacing",
+        reason: ticket?.reason ?? "daily-exhausted",
+        remaining: ticket?.remaining ?? 0,
+        ...(resetsAt ? { resetsAt } : {}),
+      },
+    },
+  })
+  const headers = { "content-type": "application/json" }
+  if (resetsAt) headers["x-ratelimit-reset"] = String(Date.parse(resetsAt))
+  return new Response(body, { status: 429, statusText: "Too Many Requests", headers })
+}
+
+export function loaderHook(client, options, pacer) {
   return async (getAuth) => {
     const auth = await getAuth()
     if (auth?.type !== "api" || !auth.key) return {}
@@ -28,8 +50,13 @@ export function loaderHook(client, options) {
         "X-Title": title,
       },
       async fetch(input, init) {
+        // 节奏闸：先占位（间隔 + 分钟配额），日额度用尽时连包都不发。
+        if (pacer) {
+          const ticket = await pacer.take(auth.key)
+          if (!ticket.allowed) return guardResponse(ticket)
+        }
         const sent = prepare(input, init, { sort: options?.sort })
-        return fetchWithFailover(fetch, sent.url, sent.init, {
+        const res = await fetchWithFailover(fetch, sent.url, sent.init, {
           key: auth.key,
           candidates,
           fallbackToHealthy: options?.fallbackToHealthy === true,
@@ -38,6 +65,9 @@ export function loaderHook(client, options) {
           maxRetries: options?.maxRetries,
           client,
         })
+        // 429 没被平台计数：把刚占的分钟配额退回去，别让失败吃掉自己的额度。
+        if (res?.status === 429 && pacer) pacer.refund(auth.key)
+        return res
       },
     }
   }
