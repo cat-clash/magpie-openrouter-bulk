@@ -1,69 +1,69 @@
-# 账号池面板（已启用）
+# 账号池面板（已注册，但内容 404）
 
-## 状态
+## 当前状态（2026-11-27 07:20 实测）
 
-**已按 magpie 的正确契约重写并启用**（2026-11-27 07:05）。
-
-## 关键认知修正（之前判断错了）
-
-第一次尝试失败时，我以为是「本地目录 spec 不被 magpie 识别」。查 marvis 的 `tests/panel-manifest.test.mjs` 后发现真正原因：
-
-```
-test("面板不得自己发网络请求（沙箱里也没有网络）", () => {
-    assert.ok(!/\bfetch\s*\(/.test(js), "面板不该 fetch：越权也没有网络")
-})
-```
-
-**面板跑在 sandbox 里（`connect-src 'none'`），没有网络。** 第一版 `pool.js` 用 `fetch('/v1/magpie/quotas')` 和 `fetch('/v1/magpie/quotas/refresh')` —— 这在面板里永远失败，「一键刷新」按钮不可能工作。
-
-另外：`panels` **不会**写进 `plugin-providers.json`（marvis / meoo 也都不在里面），所以「配置里搜不到 panels」不能当作未注册的证据 —— 那是误判。
-
-## 正确契约（出处：magpie `docs/subsystems/plugin-runtime.md` P5）
-
-- `panels: [{ slot, file, title }]`，`slot ∈ {agents, usage, settings, provider}`
-- `file` 必须是插件目录里的 `.html`，且要在 `package.json` 的 `files` 白名单里
-- 面板必须加载 `<script src="_magpie/bridge.js">`
-- 面板通过 `magpie.options.get()` / `.set()` 读写**本插件选项**
-- `options.set` 是**整份替换**（一秒最多一次），写回必须展开读到的整份 opts
-- **面板无网络**：数据只能来自插件主进程写好的文件
-
-## 实现
-
-| 文件 | 作用 |
+| 环节 | 状态 |
 |---|---|
-| `pool.html` | 结构：概览 + 账号网格 + 选项编辑区 |
-| `pool.js` | 读 `globalThis.__OR_POOL__` 渲染；`magpie.options.get/set` 编辑 failover 选项；**无 fetch** |
-| `pool.css` | 跟随 magpie 主题变量（`--fg` / `--muted` / `--border` / `--accent`） |
-| `pool-state.js` | **自动生成**，插件每次 quota 刷新后写入；面板的唯一数据源 |
+| `magpie.panels` 声明被识别 | ✅ GUI 里出现「账号池」标题 |
+| 面板 HTML 被 serve | ❌ GUI 里显示 `404 page not found` |
+| 面板数据管道（文件） | ✅ 插件写 `panel/pool-state.js`（8959 字节，58 账号） |
+| 面板数据管道（options） | ⚠ 未生效（`client.auth.set` 用法待确认） |
+| 插件主功能 | ✅ 网关 3/3 实测 200，64 测试通过 |
 
-插件侧：`src/hooks/poolstate.mjs` 负责写快照，`src/hooks/usage.mjs` 在每次 `auth.usage` 后并入账号池并落盘（进程重启会从 `pool-state.js` 恢复）。
+## 已排除的原因
 
-## 面板能做什么
+1. **不是「未注册」** —— 标题「账号池」出现在 GUI 里，说明 `package.json` 的 `magpie.panels` 被读取并渲染。
+2. **不是 `panels` 没写进 `plugin-providers.json`** —— marvis / meoo 也都不在里面，本来就存在别的地方。
+3. **不是面板里 `fetch` 被拦** —— 已改成零网络（数据走 state 文件 + options），问题发生在 HTML 加载之前。
+4. **不是 CSS/JS 相对路径** —— 已把 CSS 与 JS 全部内联进 `pool.html`，仍 404，说明 HTML 本身就没返回。
+5. **不是 gateway 路由** —— `/_magpie/bridge.js`、`/api/plugin-panels/*` 在 gateway（127.0.0.1:3425）上全 404；panel 文件由 **GUI 应用层**提供，不在 gateway。
 
-1. **账号池概览**：总数 / 有额度 / 已用尽 / 剩余请求总数
-2. **账号网格**：每个账号一根进度条（剩余/上限），按剩余降序
-3. **Failover 选项编辑**（magpie 原生只支持布尔开关，数值项必须走面板）：
-   - `fallbackToHealthy` 死模型自动改投健康模型
-   - `healthyModelsOnly` 只列健康模型
-   - `freeOnly` 只列免费模型
-   - `requestIntervalMs` 每 key 最小间隔
-   - `freeRpmLimit` 免费模型每分钟上限
-   - `dailyGuard` 日额度耗尽时短路
+## 最可能的根因
 
-## 「一键刷新」的正确做法
+从 magpie.exe 提取到的路由线索：`/api/plugin-panels`（复数，POST）、`gui.pluginPanel`、`gui.apiFramed`、`panelside.go` / `panelkey.go`。
 
-面板里做不了（无网络）。用这两个：
+panel 文件由 GUI 应用层按「**已安装包**」的路径解析。本插件的 spec 是**本地目录**：
+
+```
+C:\Users\c\AppData\Local\magpie\plugins-src\magpie-openrouter-bulk
+```
+
+而能正常工作的 marvis / meoo 都是远程包：
+
+```
+github:cat-clash/magpie-marvis
+```
+
+**推测**：本地目录 spec 时，magpie 没有把插件目录登记为可 serve 的静态资源根，于是 iframe 请求返回 Go 的默认 `404 page not found`。
+
+## 待验证（需用户决定是否冒险）
+
+把插件改从 GitHub 安装（仓库已有：`cat-clash/magpie-openrouter-bulk`），看面板是否恢复。
+
+风险与对策：
+- **可能影响账号绑定**：magpie 会重装插件到 `node_modules`，`accountId` 可能变化
+- 必须先备份：`plugin-auth.json`、`providers.json`（含 `accountNames` 58 条别名）、`plugins.json`
+- 原 spec 记录在此，失败可回滚：`C:\Users\c\AppData\Local\magpie\plugins-src\magpie-openrouter-bulk`
+- 切换后必须跑 `api-registrar/test_gateway.py` 确认 3/3，并检查 `providers.json` 的 `off` 字段（KNOWN_ISSUES 陷阱 #6）
+
+## 「一键刷新」的可用替代（不依赖面板）
+
+面板沙箱无网络，本来也做不了「一键刷新」。用这两个：
 
 ```powershell
 # 桌面快捷方式：OpenRouter一键刷新.lnk
 powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\c\Documents\deepseek-harness\default-workspace\api-registrar\一键刷新状态.ps1"
+
+# 或直接
+magpie quota refresh openrouter-live
 ```
 
-或 `magpie quota refresh openrouter-live`（刷新后面板数据也会更新）。
+`magpie quota openrouter-live` 现在会显示别名（`or-003 (or...@...)`），比长邮箱好读。
 
-## 验证记录（2026-11-27 07:04）
+## 文件
 
-- `magpie quota refresh openrouter-live` → `panel/pool-state.js` 生成 8959 字节，含 58 账号额度
-- 网关 3/3 实测 200
-- 全量测试 64 passed
-- GUI 面板是否显示需人工在 magpie 界面确认（面板由 GUI 应用层提供，gateway 路由探测不到属正常）
+| 文件 | 说明 |
+|---|---|
+| `pool.html` | 已内联 CSS + JS，唯一外部依赖是 `_magpie/bridge.js`（magpie 提供） |
+| `pool-state.js` | 插件自动写入（已加入 `.gitignore`），面板的首选数据源 |
+| `pool.js` / `pool.css` | 旧版拆分文件，已不被 `pool.html` 引用，保留备查 |

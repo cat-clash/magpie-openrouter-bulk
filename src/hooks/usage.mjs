@@ -61,6 +61,7 @@ export function usageHook(client, pacer) {
       const user = report.user || auth?.metadata?.email || "?"
       pool.set(user, poolEntry(user, report))
       await writePoolState([...pool.values()])
+      await pushSnapshotToOptions(client)
     } catch {
       // 面板只是锦上添花
     }
@@ -79,4 +80,44 @@ export function usageHook(client, pacer) {
 /** 供测试/诊断：当前池快照 */
 export function poolSnapshot() {
   return [...pool.values()]
+}
+
+// ---------- 把快照也写进插件选项（面板无文件依赖的兜底数据源） ----------
+//
+// 面板跑在 sandbox 里，若 magpie 不 serve 同目录的 pool-state.js，
+// 面板就读不到 globalThis.__OR_POOL__。这时用 magpie.options.get() 拿
+// options.poolSnapshot —— 所以每次池变化后写一次选项。
+//
+// ⚠ options.set 是整份替换且一秒最多一次：节流 5 秒，且只在内容真变了才写。
+let lastPushAt = 0
+let lastSignature = ""
+
+async function pushSnapshotToOptions(client) {
+  if (typeof client?.auth?.set !== "function") return
+  const nowMs = Date.now()
+  if (nowMs - lastPushAt < 5000) return
+  const accounts = [...pool.values()]
+  const signature = accounts.map((a) => `${a.user}:${a.remaining}`).join("|")
+  if (signature === lastSignature) return
+  lastPushAt = nowMs
+  lastSignature = signature
+  try {
+    const got = await client.auth.get({ path: { id: PROVIDER } })
+    const current = (got && got.body) || got || {}
+    await client.auth.set({
+      path: { id: PROVIDER },
+      body: {
+        ...current,
+        options: {
+          ...(current.options ?? {}),
+          poolSnapshot: {
+            at: new Date().toISOString().replace("T", " ").slice(0, 19),
+            accounts,
+          },
+        },
+      },
+    })
+  } catch {
+    // 选项写入失败不影响配额
+  }
 }

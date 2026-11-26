@@ -3,10 +3,186 @@
 <head>
 <meta charset="utf-8">
 <title>账号池 · OpenRouter</title>
-<link rel="stylesheet" href="pool.css">
+<style>
+.or-pool{display:flex;flex-direction:column;gap:10px;font:inherit}
+.muted{color:var(--muted,#6b7280)}
+.head{display:flex;flex-direction:column;gap:2px}
+.head .big{font-weight:600;font-variant-numeric:tabular-nums}
+.head .sub{color:var(--muted,#6b7280);font-size:.86em;font-variant-numeric:tabular-nums}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;max-height:300px;overflow-y:auto}
+.card{border:1px solid var(--border,#d4d4d8);border-radius:8px;padding:6px 8px;display:flex;flex-direction:column;gap:4px;font-size:.8em}
+.card.spent{opacity:.6}
+.card .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
+.card .bar{height:4px;border-radius:999px;background:var(--border,#e4e4e7);overflow:hidden}
+.card .bar i{display:block;height:100%;background:var(--accent,#52525b);border-radius:999px}
+.card .meta{color:var(--muted,#6b7280);font-variant-numeric:tabular-nums}
+.opts{border-top:1px solid var(--border,#e4e4e7);padding-top:8px;display:flex;flex-direction:column;gap:6px}
+.opts-title{font-weight:600;font-size:.9em}
+.opt{display:flex;align-items:center;gap:8px;font-size:.86em}
+.opt-label{flex:1 1 auto;color:var(--muted,#6b7280)}
+.opt input[type=number]{width:90px;font:inherit;padding:2px 6px}
+.opt input[type=checkbox]{width:16px;height:16px}
+.btn{align-self:flex-start;font:inherit;padding:4px 12px;border-radius:6px;border:1px solid var(--accent,#52525b);background:transparent;color:inherit;cursor:pointer;font-weight:600}
+.btn:hover{background:var(--border,#e4e4e7)}
+.btn:disabled{opacity:.55;cursor:default}
+.hint{color:var(--muted,#6b7280);font-size:.8em}
+</style>
 <script src="_magpie/bridge.js"></script>
-<script src="pool-state.js"></script>
-<script src="pool.js" defer></script>
+<script>
+// 经典脚本（不能顶层 await），包 async IIFE。
+// 数据两个来源，按优先级：
+//   1. globalThis.__OR_POOL__      —— 插件写的 pool-state.js（若 magpie 能 serve 同目录文件）
+//   3. magpie.options.get().poolSnapshot —— 插件把快照也存进选项，面板无文件依赖也能读
+void (async () => {
+  await magpie.ready
+
+  const root = document.getElementById("root")
+  const el = (tag, cls, text) => {
+    const n = document.createElement(tag)
+    if (cls) n.className = cls
+    if (text != null) n.textContent = text
+    return n
+  }
+
+  const STRINGS = {
+    zh: {
+      noData: "还没有账号池数据。在 magpie 里用 OpenRouter 发一次请求或刷新额度，这里就会出现。",
+      accounts: "账号", withQuota: "有额度", exhausted: "已用尽", left: "剩余请求",
+      options: "Failover 选项",
+      fallback: "死模型自动改投健康模型",
+      healthyOnly: "只列健康模型",
+      freeOnly: "只列免费模型",
+      interval: "每 key 最小间隔 (ms)",
+      rpm: "免费模型每分钟上限",
+      dailyGuard: "日额度耗尽时短路",
+      save: "保存", saved: "已保存 · 下个请求起生效",
+      saveFail: "保存失败：", readFail: "读取选项失败：",
+    },
+    en: {
+      noData: "No pool data yet. Send one OpenRouter request or refresh quotas and it shows up here.",
+      accounts: "accounts", withQuota: "with quota", exhausted: "exhausted", left: "requests left",
+      options: "Failover options",
+      fallback: "Switch dead models to a healthy one",
+      healthyOnly: "List healthy models only",
+      freeOnly: "List free models only",
+      interval: "Min interval per key (ms)",
+      rpm: "Free-model requests per minute",
+      dailyGuard: "Short-circuit when daily quota is spent",
+      save: "Save", saved: "Saved · applies to the next request",
+      saveFail: "Could not save: ", readFail: "Could not read options: ",
+    },
+  }
+
+  const lang = String((magpie.theme && magpie.theme.lang) || document.documentElement.lang || "en").toLowerCase()
+  const t = STRINGS[lang.startsWith("zh") ? "zh" : "en"]
+
+  root.replaceChildren(el("p", "muted", "读取中…"))
+
+  // ---------- 读选项（同时拿 poolSnapshot 兜底） ----------
+  let opts = {}
+  try {
+    const got = await magpie.options.get()
+    if (got && typeof got === "object" && !Array.isArray(got)) opts = got
+  } catch (err) {
+    root.append(el("p", "hint", t.readFail + (err && err.message ? err.message : err)))
+  }
+
+  const data = globalThis.__OR_POOL__ || opts.poolSnapshot || null
+
+  // ---------- 渲染账号池 ----------
+  if (!data || !Array.isArray(data.accounts) || !data.accounts.length) {
+    root.replaceChildren(el("p", "muted", t.noData))
+  } else {
+    const accts = data.accounts
+    let withQuota = 0, exhausted = 0, left = 0
+    for (const a of accts) {
+      if ((a.remaining || 0) > 0) { withQuota++; left += a.remaining } else exhausted++
+    }
+    const head = el("div", "head")
+    head.append(
+      el("div", "big", accts.length + " " + t.accounts),
+      el("div", "sub", withQuota + " " + t.withQuota + " · " + exhausted + " " + t.exhausted + " · " + left + " " + t.left),
+    )
+    if (data.at) head.append(el("div", "sub muted", String(data.at)))
+    root.replaceChildren(head)
+
+    const grid = el("div", "grid")
+    const sorted = accts.slice().sort((x, y) => (y.remaining || 0) - (x.remaining || 0))
+    for (const a of sorted.slice(0, 80)) {
+      const card = el("div", "card " + ((a.remaining || 0) > 0 ? "ok" : "spent"))
+      card.append(el("div", "name", a.alias || a.name || a.user || "?"))
+      const bar = el("div", "bar")
+      const limit = a.limit || 50
+      const fill = el("i")
+      fill.style.width = Math.max(0, Math.min(100, ((a.remaining || 0) / limit) * 100)) + "%"
+      bar.append(fill)
+      card.append(bar)
+      card.append(el("div", "meta", (a.used || 0) + " / " + limit + " · " + (a.remaining || 0) + " left"))
+      grid.append(card)
+    }
+    root.append(grid)
+  }
+
+  // ---------- 选项编辑 ----------
+  const box = el("div", "opts")
+  box.append(el("div", "opts-title", t.options))
+
+  const numField = (label, key, def) => {
+    const row = el("label", "opt")
+    row.append(el("span", "opt-label", label))
+    const input = el("input")
+    input.type = "number"; input.min = "0"
+    input.value = String(opts[key] != null ? opts[key] : def)
+    row.append(input); box.append(row)
+    return { key, input }
+  }
+  const boolField = (label, key, def) => {
+    const row = el("label", "opt")
+    row.append(el("span", "opt-label", label))
+    const input = el("input")
+    input.type = "checkbox"
+    input.checked = opts[key] != null ? !!opts[key] : def
+    row.append(input); box.append(row)
+    return { key, input, isBool: true }
+  }
+
+  const fields = [
+    boolField(t.fallback, "fallbackToHealthy", false),
+    boolField(t.healthyOnly, "healthyModelsOnly", false),
+    boolField(t.freeOnly, "freeOnly", false),
+    numField(t.interval, "requestIntervalMs", 0),
+    numField(t.rpm, "freeRpmLimit", 20),
+    boolField(t.dailyGuard, "dailyGuard", true),
+  ]
+
+  const saveBtn = el("button", "btn", t.save)
+  saveBtn.type = "button"
+  const status = el("span", "muted")
+  box.append(saveBtn, status)
+  root.append(box)
+
+  saveBtn.addEventListener("click", async () => {
+    saveBtn.disabled = true
+    try {
+      const next = Object.assign({}, opts)
+      for (const f of fields) {
+        if (f.isBool) next[f.key] = !!f.input.checked
+        else {
+          const n = Number(f.input.value)
+          next[f.key] = (isFinite(n) && n >= 0) ? n : 0
+        }
+      }
+      const back = await magpie.options.set(next)
+      if (back && typeof back === "object" && !Array.isArray(back)) opts = back
+      status.textContent = t.saved
+    } catch (err) {
+      status.textContent = t.saveFail + (err && err.message ? err.message : err)
+    } finally {
+      saveBtn.disabled = false
+    }
+  })
+})()
+</script>
 </head>
 <body>
 <div id="root" class="or-pool"><p class="muted">读取中…</p></div>
