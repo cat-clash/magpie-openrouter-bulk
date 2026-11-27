@@ -1,7 +1,7 @@
 // src/pacing.test.mjs — 节奏闸用例（纯内存 + 注入时钟，不碰网络）
 //
-// 覆盖：默认零延迟、间隔闸、滑动窗口不超速、日额度短路、重置后恢复、refund、
-// 快照、并发占位安全、noteUsage 解析。
+// 覆盖：默认节奏（间隔+抖动）、显式关闭、间隔闸、滑动窗口不超速、日额度短路、
+// 重置后恢复、refund、快照、并发占位安全、noteUsage 解析。
 
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -18,6 +18,7 @@ function harness(opts = {}) {
   const pacer = createPacer({
     ...opts,
     now: () => t,
+    random: () => 0.5, // 抖动固定 50%
     sleep: async (ms) => {
       sleeps.push(ms)
       await Promise.resolve()
@@ -27,23 +28,35 @@ function harness(opts = {}) {
   return { pacer, sleeps, clock: () => t }
 }
 
-test("默认配置不引入延迟（requestIntervalMs=0）", async () => {
+test("默认节奏：首请求等抖动，第二请求按间隔+抖动排队，快照如实", async () => {
   const { pacer, sleeps } = harness()
   const first = await pacer.take("sk-or-a")
   const second = await pacer.take("sk-or-a")
   assert.equal(first.allowed, true)
   assert.equal(second.allowed, true)
+  // 首请求：无上次放行 → waitMs 0，只睡抖动 60ms（时钟推进到 T0+60）。
+  // 第二请求：距上次放行(T0)不足 250ms → 槽位 T0+250，waitMs = 250-60 = 190，再睡抖动 60 → 共 250。
   assert.equal(first.waitMs, 0)
-  assert.equal(second.waitMs, 0)
-  assert.deepEqual(sleeps, [], "默认配置一次都不睡")
+  assert.equal(second.waitMs, 190)
+  assert.deepEqual(sleeps, [60, 250], "首请求睡抖动，第二请求等满间隔+抖动")
   const snap = pacer.snapshot()
-  assert.equal(snap.requestIntervalMs, 0)
+  assert.equal(snap.requestIntervalMs, 250)
+  assert.equal(snap.requestJitterMs, 120)
   assert.equal(snap.freeRpmLimit, 20)
   assert.equal(snap.dailyGuard, true)
 })
 
+test("显式 requestIntervalMs=0 + requestJitterMs=0 完全不引入延迟", async () => {
+  const { pacer, sleeps } = harness({ requestIntervalMs: 0, requestJitterMs: 0 })
+  const first = await pacer.take("sk-or-a")
+  const second = await pacer.take("sk-or-a")
+  assert.equal(first.waitMs, 0)
+  assert.equal(second.waitMs, 0)
+  assert.deepEqual(sleeps, [], "关闭后一次都不睡")
+})
+
 test("间隔闸：同一 key 相邻两次放行至少间隔 requestIntervalMs，不同 key 互不影响", async () => {
-  const { pacer } = harness({ requestIntervalMs: 800, freeRpmLimit: 0 })
+  const { pacer } = harness({ requestIntervalMs: 800, requestJitterMs: 0, freeRpmLimit: 0 })
   assert.equal((await pacer.take("k1")).waitMs, 0)
   const second = await pacer.take("k1")
   assert.equal(second.waitMs, 800, "第二次等满 800ms")
@@ -52,7 +65,7 @@ test("间隔闸：同一 key 相邻两次放行至少间隔 requestIntervalMs，
 })
 
 test("滑动窗口：超出每分钟配额时排队到最早一笔滑出窗口", async () => {
-  const { pacer, sleeps } = harness({ freeRpmLimit: 3, windowMs: 60_000 })
+  const { pacer, sleeps } = harness({ freeRpmLimit: 3, windowMs: 60_000, requestIntervalMs: 0, requestJitterMs: 0 })
   const waits = []
   for (let i = 0; i < 3; i++) waits.push((await pacer.take("k1")).waitMs)
   assert.deepEqual(waits, [0, 0, 0], "前三笔不排队")
@@ -89,7 +102,7 @@ test("重置时刻已过则恢复放行；dailyGuard=false 时完全不拦", asy
 })
 
 test("refund 把最近一次占位还给窗口", async () => {
-  const { pacer } = harness({ freeRpmLimit: 1, windowMs: 60_000 })
+  const { pacer } = harness({ freeRpmLimit: 1, windowMs: 60_000, requestIntervalMs: 0, requestJitterMs: 0 })
   assert.equal((await pacer.take("k1")).waitMs, 0)
   assert.equal(pacer.refund("k1"), true, "退格成功")
   assert.equal((await pacer.take("k1")).waitMs, 0, "退还后不必等窗口滑出")
@@ -132,7 +145,7 @@ test("noteUsage 识别 free models 窗口：剩 3 次照常放行，剩 0 次立
 })
 
 test("并发安全：同步占位，窗口内放行数不超配额且槽位互不重叠", async () => {
-  const { pacer } = harness({ freeRpmLimit: 3, windowMs: 60_000 })
+  const { pacer } = harness({ freeRpmLimit: 3, windowMs: 60_000, requestIntervalMs: 0, requestJitterMs: 0 })
   const tickets = await Promise.all(Array.from({ length: 9 }, () => pacer.take("k1")))
   assert.ok(tickets.every((tk) => tk.allowed))
   const waits = tickets.map((tk) => tk.waitMs)
@@ -145,7 +158,7 @@ test("并发安全：同步占位，窗口内放行数不超配额且槽位互�
 })
 
 test("rpmScope=global 时所有账号共用一个窗口", async () => {
-  const { pacer } = harness({ freeRpmLimit: 2, rpmScope: "global" })
+  const { pacer } = harness({ freeRpmLimit: 2, rpmScope: "global", requestIntervalMs: 0, requestJitterMs: 0 })
   assert.equal((await pacer.take("k1")).waitMs, 0)
   assert.equal((await pacer.take("k2")).waitMs, 0)
   assert.equal((await pacer.take("k3")).waitMs, 60_000, "第三个 key 撞全局窗口")

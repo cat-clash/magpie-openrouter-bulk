@@ -55,7 +55,9 @@ test("classify429: 无法归类归 other", () => {
 // ---- readRetryAfter / cooldownUntilMs ----
 test("readRetryAfter: 秒数与 x-ratelimit-reset 都能读", () => {
   const now = Date.now()
-  assert.equal(readRetryAfter(res("", 429, { "retry-after": "12" })), now + 12_000)
+  // readRetryAfter 内部会再取一次 Date.now()，允许毫秒级时序差（容差 100ms）。
+  const ra = readRetryAfter(res("", 429, { "retry-after": "12" }))
+  assert.ok(Math.abs(ra - (now + 12_000)) < 100, `retry-after 秒数: got ${ra}, expect ~${now + 12_000}`)
   assert.equal(readRetryAfter(res("", 429, { "x-ratelimit-reset": String(now + 3_600_000) })), now + 3_600_000)
   assert.equal(readRetryAfter(res("", 429, {})), undefined)
 })

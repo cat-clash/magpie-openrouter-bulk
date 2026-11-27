@@ -1,17 +1,23 @@
-// src/pacing.mjs — 请求节奏控制（间隔闸 + 免费额度窗口 + 日额度短路）
+// src/pacing.mjs — 请求节奏控制（间隔闸 + 抖动 + 免费额度窗口 + 日额度短路）
 //
-// 三件事，各自独立、可单独关掉：
+// 四件事，各自独立、可单独关掉：
 //
-//   ① 最小请求间隔    requestIntervalMs（默认 0 = 关）
-//      同一把 key 相邻两次放行的最小间隔。默认 0 —— 保持 0.5.0 的行为：不引入任何延迟。
+//   ① 最小请求间隔    requestIntervalMs（默认 250）
+//      同一把 key 相邻两次放行的最小间隔。默认 250ms —— 不要 0：58 账号池从同一出口 IP
+//      无节流连发是「总是限流」的诱因（移植自 marvis 0.8 的教训：节奏闸是预防，熔断是止损）。
+//      显式传 0 = 关闭间隔闸。
 //
-//   ② 免费模型分钟配额 freeRpmLimit（默认 20）/ windowMs（默认 60000）
+//   ② 随机抖动         requestJitterMs（默认 120）
+//      每次放行叠加 random()*jitterMs 的抖动，把固定间隔打散成接近人的随机分布，也把
+//      进程启动后第一批请求错开。显式传 0 = 关闭抖动。只叠加在睡眠上，不污染窗口槽位。
+//
+//   ③ 免费模型分钟配额 freeRpmLimit（默认 20）/ windowMs（默认 60000）
 //      OpenRouter 免费模型是「20 请求/分钟」的平台硬限（每个 key 各自一份）。这里用
 //      **滑动窗口**而不是固定窗口：固定窗口在窗口边界会放过 2×限制。默认 rpmScope="key"
 //      —— 与平台语义一致（每 key 一份）；改成 "global" 则所有账号共用一个窗口（58 账号池
 //      下会把总吞吐压到 20/min，除非你确实想给出口 IP 限速）。
 //
-//   ③ 日额度短路      dailyGuard（默认 true）
+//   ④ 日额度短路      dailyGuard（默认 true）
 //      从最近一次 GET /key 快照读 free_model_daily_requests 的 remaining，剩 0 且
 //      重置时刻未到 → take() 直接返回 allowed:false，**一个字节都不发**。loader 会把
 //      它翻译成合成的 key 级 429，magpie 随即换账号 —— 比白发一次必 429 的请求便宜。
@@ -21,9 +27,11 @@
 // 按调用顺序落在同一条时间轴上，实际启动间隔 ≥ 间隔闸、窗口内放行数 ≤ 配额；不是互斥队列，
 // 每个调用方各睡自己的槽位。
 //
-// 纯内存、零 IO、零依赖；now / sleep 可注入，测试可完全确定化。
+// 纯内存、零 IO、零依赖；now / sleep / random 可注入，测试可完全确定化。
 
 const DEFAULT_WINDOW_MS = 60 * 1000
+const DEFAULT_INTERVAL_MS = 250
+const DEFAULT_JITTER_MS = 120
 
 function nonNegative(value, fallback) {
   return Number.isFinite(value) && value >= 0 ? value : fallback
@@ -39,13 +47,15 @@ function nonNegative(value, fallback) {
  * snapshot() → 诊断快照（窗口用量、剩余、每条时间轴、日额度表）
  */
 export function createPacer(opts = {}) {
-  const requestIntervalMs = nonNegative(opts.requestIntervalMs, 0)
+  const requestIntervalMs = nonNegative(opts.requestIntervalMs, DEFAULT_INTERVAL_MS)
+  const requestJitterMs = nonNegative(opts.requestJitterMs, DEFAULT_JITTER_MS)
   const freeRpmLimit = nonNegative(opts.freeRpmLimit, 20)
   const rpmScope = opts.rpmScope === "global" ? "global" : "key"
   const dailyGuard = opts.dailyGuard !== false
   const windowMs = nonNegative(opts.windowMs, DEFAULT_WINDOW_MS)
   const now = typeof opts.now === "function" ? opts.now : Date.now
   const doSleep = typeof opts.sleep === "function" ? opts.sleep : (ms) => new Promise((r) => setTimeout(r, ms))
+  const doRandom = typeof opts.random === "function" ? opts.random : Math.random
 
   const GLOBAL = "*"
   const axes = new Map() // key -> 上次占位的时刻（计划值，含等待）
@@ -118,9 +128,11 @@ export function createPacer(opts = {}) {
     axes.set(k, at)
     counters.taken++
     const waitMs = at - t
-    if (waitMs > 0) {
+    // 抖动只叠加在睡眠上（不污染窗口槽位/时间轴）：把固定间隔打散成随机分布。
+    const jitter = requestJitterMs > 0 ? doRandom() * requestJitterMs : 0
+    if (waitMs + jitter > 0) {
       counters.waited++
-      await doSleep(waitMs)
+      await doSleep(waitMs + jitter)
     }
     return { allowed: true, waitMs, key: k }
   }
@@ -178,6 +190,7 @@ export function createPacer(opts = {}) {
     }
     return {
       requestIntervalMs,
+      requestJitterMs,
       freeRpmLimit,
       rpmScope,
       dailyGuard,

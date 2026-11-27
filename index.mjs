@@ -21,6 +21,7 @@ import {
   DEAD_MODELS,
   fetchWithFailover,
   fmtFailover,
+  markModelCooldown,
   pickCandidate,
   snapshotStats,
   stats,
@@ -33,13 +34,28 @@ import { IMPORT_FROM, IMPORT_FROMS, authOptions } from "./src/hooks/options.mjs"
 import { rememberName, usageHook } from "./src/hooks/usage.mjs"
 import { HEALTHY_MODELS, PROVIDER } from "./src/context.mjs"
 import { createPacer } from "./src/pacing.mjs"
+import {
+  accountKeyOf,
+  accountLabelOf,
+  addPersistedModelCooldown,
+  breakerBuckets,
+  breakerStatePath,
+  hydrateModelCooldowns,
+  persistedModelCooldownSnapshot,
+  resetAllBreakers,
+  riskBreaker,
+  riskEvents,
+  shouldGate,
+} from "./src/risk.mjs"
 
 // 节奏闸按插件实例建一份：选项来自 magpie 的 input.magpie.options。
-// 默认 requestIntervalMs=0、freeRpmLimit=20（每 key 20/分钟，与平台免费限一致）、
-// dailyGuard=true —— 只有「日额度真剩 0」时才会拦下请求，正常路径零延迟。
+// 默认 requestIntervalMs=250 + requestJitterMs=120（防 58 账号池从同一出口 IP 无节流
+// 连发导致"总是限流"，见 src/pacing.mjs）、freeRpmLimit=20（每 key 20/分钟，与平台免费
+// 限一致）、dailyGuard=true —— 只有「日额度真剩 0」时才会拦下请求，正常路径极低延迟。
 function pacerFromOptions(options) {
   return createPacer({
     requestIntervalMs: options?.requestIntervalMs,
+    requestJitterMs: options?.requestJitterMs,
     freeRpmLimit: options?.freeRpmLimit,
     rpmScope: options?.rpmScope,
     dailyGuard: options?.dailyGuard,
@@ -49,6 +65,12 @@ function pacerFromOptions(options) {
 
 export const OpenRouterPlugin = async ({ client } = {}, options) => {
   const pacer = pacerFromOptions(options)
+  // 启动时把落盘的模型冷却灌回 failover 的内存表（重启后上游限流的模型不会立刻再被打）。
+  try {
+    hydrateModelCooldowns(markModelCooldown)
+  } catch {
+    // 灌入失败不影响插件启动
+  }
   return {
     config: configHook(),
 
@@ -83,5 +105,18 @@ export const _internal = {
   clearCatalogCache,
   clearUsageCache: () => clearUsageCache(),
   createPacer,
-  failover: { stats, snapshotStats, fmtFailover, classify429, pickCandidate, DEAD_MODELS, fetchWithFailover },
+  failover: { stats, snapshotStats, fmtFailover, classify429, pickCandidate, DEAD_MODELS, fetchWithFailover, markModelCooldown },
+  risk: {
+    accountKeyOf,
+    accountLabelOf,
+    addPersistedModelCooldown,
+    breakerBuckets,
+    breakerStatePath,
+    hydrateModelCooldowns,
+    persistedModelCooldownSnapshot,
+    resetAllBreakers,
+    riskBreaker,
+    riskEvents,
+    shouldGate,
+  },
 }

@@ -1,7 +1,7 @@
-﻿{
+{
     "name":  "magpie-openrouter-bulk",
-    "version":  "0.6.2",
-    "description":  "OpenRouter provider plugin for magpie/OpenCode with batch key import, dual-dimension 429 failover and per-account quota helpers (based on biyan113/magpie-openrouter)",
+    "version":  "0.7.0",
+    "description":  "OpenRouter provider plugin for magpie/OpenCode with batch key import, dual-dimension 429 failover, per-account pacing + circuit breaker (anti rate-limit) and per-account quota helpers (based on biyan113/magpie-openrouter)",
     "type":  "module",
     "main":  "./index.mjs",
     "files":  [
@@ -58,10 +58,12 @@
                               ]
                },
     "optionsExample":  {
-                           "_说明":  "批量导入的 OpenRouter key 账号池。fallbackToHealthy：请求点到已实测全灭的模型（ling-3.2-flash、gemma-4-*）时，直接改投一个健康免费模型，省一次必 429 的请求。healthyModelsOnly：模型列表只暴露实测健康的零价模型，隐藏 429 死模型。freeOnly：只列免费号真能调用的零价模型（不列 600+ 付费模型）。",
+                           "_说明":  "批量导入的 OpenRouter key 账号池。fallbackToHealthy：请求点到已实测全灭的模型（ling-3.2-flash、gemma-4-*）时，直接改投一个健康免费模型，省一次必 429 的请求。healthyModelsOnly：模型列表只暴露实测健康的零价模型，隐藏 429 死模型。freeOnly：只列免费号真能调用的零价模型（不列 600+ 付费模型）。requestIntervalMs/requestJitterMs：出站节奏闸（默认 250/120ms，防 58 账号池从同一 IP 无节流连发导致'总是限流'；传 0 关闭）。风控熔断（src/risk.mjs）默认开：按账号连续非预期失败达阈值即本地 fail-fast 冷却，跨账号同时被拦自动判定为 IP 被封、全池短暂暂停；可用环境变量 OPENROUTER_RISK_* 调参。",
                            "fallbackToHealthy":  false,
                            "healthyModelsOnly":  false,
                            "freeOnly":  false,
-                           "providerSort":  "price"
+                           "providerSort":  "price",
+                           "requestIntervalMs":  250,
+                           "requestJitterMs":  120
                        }
 }

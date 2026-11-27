@@ -12,6 +12,38 @@
 - **导入即记账**：导入验证时把 `limit` / `limit_remaining` / `usage` / `free_tier` / `free_daily_limit` 快照进账号 metadata，账本里直接可查每把 key 的身价
 - **路由**：chat 请求走 `openrouter/auto` 时可按 `options.sort`（price/throughput/latency）注入 `provider.sort`；classifier 走 Decisions API
 
+## 防限流（0.7.0，移植自 magpie-marvis 0.8 的风控体系）
+
+58 账号池从**同一出口 IP** 无节流猛打 OpenRouter，一旦被打就交给 magpie 宿主连试 7 次，越打越狠 —— 这就是"总是限流 / 界面一片 429"的根因。本插件现含两层防线：
+
+| 层 | 机制 | 默认 |
+|---|---|---|
+| **节奏闸**（`src/pacing.mjs`） | 出站前按账号拉开最小间隔 + 随机抖动，把固定连发打散成接近人的分布；`requestIntervalMs` 默认 **250ms**、`requestJitterMs` 默认 **120ms**（0.6.x 之前默认 0 = 不引入延迟，已改） | 开 |
+| **风控熔断**（`src/risk.mjs`） | 按账号连续遇到**非预期**失败（非 free-models-per-day 的 401/上游限流/5xx）达阈值（默认 3）→ 本地 **fail-fast**（合成 429 带 retry-after，**一个上游请求都不发**），指数退避（30min→8h，+10% jitter），半开探测，状态落盘 `<稳定目录>/breaker-state.json`（重启不丢） | 开 |
+| **跨账号共因闸** | 窗口内（默认 10min）**多个不同账号**先后被拦 → 判定拦的不是账号而是通道（出口 IP / 上游节点被 throttled）→ 自动打开全局桶，整个池短暂暂停，而不是 58 个账号挨个撞墙 | 开 |
+| **模型冷却持久化** | failover 的模型 cooldown 落盘，`model-cooldowns.json`，重启后上游限流的模型不会立刻再被打 | 开 |
+
+稳定目录：环境变量 `OPENROUTER_RISK_DIR`（默认 `~/.magpie-openrouter-bulk`）。熔断参数全部可用环境变量覆盖：
+
+```text
+OPENROUTER_RISK_THRESHOLD    连续失败阈值（默认 3）
+OPENROUTER_RISK_COOLDOWN_MS  退避基准（默认 1800000 = 30min；0 = 禁用熔断）
+OPENROUTER_RISK_SCOPE        account | global（默认 account：一个账号被打只冷却它）
+OPENROUTER_RISK_CONSENSUS    共因判定需几个不同账号被拦（默认 2；0 = 关）
+OPENROUTER_RISK_WINDOW_MS    共因判定窗口（默认 600000 = 10min）
+```
+
+诊断（CLI/脚本可读）：
+```js
+import { _internal } from "./index.mjs"
+_internal.risk.breakerBuckets()   // 每个账号桶的 failures / 冷却剩余
+_internal.risk.riskEvents()       // 近 50 条熔断事件
+_internal.risk.persistedModelCooldownSnapshot()
+_internal.risk.resetAllBreakers() // 手动解除所有冷却
+```
+
+> ⚠️ 熔断合成的 429 **刻意不用** `free-models-per-day` 标记（那会触发 magpie 对 key 级 429 的 +35 天 rest bug，见 KNOWN_ISSUES BUG #1），改带 `retry-after`（clamp 到 300s）让 magpie 短暂 rest 该账号后换下一个 —— 既 stop-loss 又不锁死账号。
+
 ## 安装
 
 ```sh

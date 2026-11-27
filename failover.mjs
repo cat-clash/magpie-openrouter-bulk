@@ -234,6 +234,8 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 //     maxRetries, 总重试次数上限（默认 3：模型切换 ≤1 次 + 同模型退避补足）
 //     modelCooldownMs,    模型级 cooldown 时长覆盖
 //     client,     用于 app.log
+//     onModelCooldown,    (model, untilMs) => void —— 模型被冷却时回调（供落盘持久化）
+//     onClassified,       (info, res, text) => void —— 429 被分类后回调（供熔断器记录）
 //   }
 export async function fetchWithFailover(doFetch, url, init, opts = {}) {
   const maxAttempts = 1 + Math.max(0, Number.isFinite(opts.maxRetries) ? opts.maxRetries : 3)
@@ -287,6 +289,12 @@ export async function fetchWithFailover(doFetch, url, init, opts = {}) {
     const info = classify429(text, res.headers)
     const retryAt = readRetryAfter(res)
     const now = Date.now()
+    // 429 分类完成：交给熔断器记录（key 级日额度耗尽算"正常"；model/other 算风险失败）
+    try {
+      opts?.onClassified?.(info, res, text)
+    } catch {
+      // 回调失败不影响请求
+    }
 
     if (info.kind === "key") {
       // key 级：插件拿不到其他账号的 key，无法在插件内轮换。
@@ -303,7 +311,14 @@ export async function fetchWithFailover(doFetch, url, init, opts = {}) {
       stats.model++
       // 冷却这个模型（60s 或 retry-after 告知的时刻）
       const until = cooldownUntilMs("model", retryAt, now)
-      if (current) markModelCooldown(current, until, now)
+      if (current) {
+        markModelCooldown(current, until, now)
+        try {
+          opts?.onModelCooldown?.(current, until)
+        } catch {
+          // 落盘失败不影响请求
+        }
+      }
       record("model", { model: current, reason: "upstream", until: new Date(until).toISOString() })
       if (attempt >= maxAttempts - 1 || modelSwitched) return rebuilt()
       const next = pickCandidate(candidates, current, now, used, { cooldownMs })
