@@ -185,15 +185,20 @@ test("fallbackToHealthy: 点名死模型不开打上游直接改投", async () =
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ model: "inclusionai/ling-3.2-flash:free", messages: [] }),
-  }, { key: "k", candidates: ["baidu/ernie-5.5-flash-preview:free"], fallbackToHealthy: true })
+  }, { key: "k", candidates: ["baidu/ernie-5.5-flash-preview:free"], fallbackToHealthy: true, deadModels: new Set(["inclusionai/ling-3.2-flash:free"]) })
   assert.equal(out.status, 200)
   assert.deepEqual(calls, ["baidu/ernie-5.5-flash-preview:free"], "死模型请求改投，未发出原模型")
   assert.equal(stats.switched, 1)
 })
 
 // ---- 插件集成：healthyModelsOnly 隐藏死模型 ----
-test("插件 healthyModelsOnly 在 models 钩子隐藏 3 个死模型", async () => {
-  const hooks = await OpenRouterPlugin({}, { healthyModelsOnly: true })
+test("插件 healthyModelsOnly 在 models 钩子隐藏注入的死模型", async () => {
+  // 内置 DEAD_MODELS 已于 2026-11-27 清空（复测全通），所以这里注入一个死模型集合，
+  // 验证「隐藏」这条路径本身仍然有效。
+  const hooks = await OpenRouterPlugin({}, {
+    healthyModelsOnly: true,
+    deadModels: ["inclusionai/ling-3.2-flash:free", "google/gemma-4-31b-it:free", "google/gemma-4-26b-a4b-it:free"],
+  })
   const provider = { models: { "inclusionai/ling-3.2-flash:free": { name: "ling" }, "google/gemma-4-31b-it:free": { name: "g31" }, "google/gemma-4-26b-a4b-it:free": { name: "g26" }, "baidu/ernie-5.5-flash-preview:free": { name: "ernie", free: true } } }
   const out = await hooks.provider.models(provider, {})
   assert.ok(!("inclusionai/ling-3.2-flash:free" in out))
@@ -228,8 +233,11 @@ test("loader.fetch 集成：健康模型请求透传成功", async () => {
 })
 
 // ---- 插件集成：点名死模型 + fallbackToHealthy，经 loader.fetch 改投 ----
-test("loader.fetch 集成：fallbackToHealthy 把死模型改投健康模型", async () => {
-  const hooks = await OpenRouterPlugin({}, { fallbackToHealthy: true })
+test("loader.fetch 集成：fallbackToHealthy 把注入的死模型改投健康模型", async () => {
+  const hooks = await OpenRouterPlugin({}, {
+    fallbackToHealthy: true,
+    deadModels: ["google/gemma-4-26b-a4b-it:free"],
+  })
   const loaded = await hooks.auth.loader(async () => ({ type: "api", key: "sk-or-v1-test" }))
   const seen = []
   const prev = globalThis.fetch
@@ -262,10 +270,10 @@ test("snapshotStats 返回分类计数", () => {
   assert.ok(Array.isArray(snap.history))
 })
 
-test("DEAD_MODELS 覆盖 ling-3.2 与 gemma-4-*", () => {
-  assert.ok(DEAD_MODELS.has("inclusionai/ling-3.2-flash:free"))
-  assert.ok(DEAD_MODELS.has("google/gemma-4-31b-it:free"))
-  assert.ok(DEAD_MODELS.has("google/gemma-4-26b-a4b-it:free"))
+test("DEAD_MODELS 已清空（2026-11-27 复测：那 3 个模型全 200，之前是 type 字段缺失的误判）", () => {
+  assert.equal(DEAD_MODELS.size, 0)
+  // 机制仍在：可以用 opts.deadModels 注入
+  assert.ok(DEAD_MODELS instanceof Set)
 })
 
 // ---- _internal 暴露 failover 工具 ----

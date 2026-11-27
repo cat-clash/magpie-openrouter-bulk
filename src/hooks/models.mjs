@@ -24,10 +24,12 @@ function usable(models, options) {
   const freeOnly = options?.freeOnly === true
   const healthyOnly = options?.healthyModelsOnly === true
   if (!freeOnly && !healthyOnly) return models
+  // 允许注入死模型集合（默认用内置 DEAD_MODELS，现为空 —— 2026-11-27 复测全通）
+  const dead = Array.isArray(options?.deadModels) ? new Set(options.deadModels) : DEAD_MODELS
   const out = {}
   for (const [id, model] of Object.entries(models)) {
     if (freeOnly && !(model?.free === true || id === "openrouter/auto")) continue
-    if (healthyOnly && DEAD_MODELS.has(id)) continue
+    if (healthyOnly && dead.has(id)) continue
     out[id] = model
   }
   return out

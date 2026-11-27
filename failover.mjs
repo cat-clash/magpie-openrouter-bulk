@@ -240,6 +240,9 @@ export async function fetchWithFailover(doFetch, url, init, opts = {}) {
   const candidates = Array.isArray(opts.candidates) ? opts.candidates.filter(Boolean) : []
   const cooldownMs = Number.isFinite(opts.modelCooldownMs) && opts.modelCooldownMs > 0 ? opts.modelCooldownMs : MODEL_COOLDOWN_MS
   const fallback = opts.fallbackToHealthy === true
+  // 允许调用方注入死模型集合（默认用内置的 DEAD_MODELS，当前为空 —— 见 context.mjs 注释）。
+  // 注入能力主要给测试用：内置列表清空后，仍能验证「改投」这条路径。
+  const deadSet = opts.deadModels instanceof Set ? opts.deadModels : DEAD_MODELS
   const client = opts.client
   const bare = { ...init, headers: new Headers(init?.headers) }
   bare.headers.delete("content-length")
@@ -249,7 +252,7 @@ export async function fetchWithFailover(doFetch, url, init, opts = {}) {
   let current = requestModel
   let init0 = bare
   // 请求点名了全灭模型：先别发，直接改投健康模型（省一次必 429 的请求）。
-  if (fallback && current && DEAD_MODELS.has(current)) {
+  if (fallback && current && deadSet.has(current)) {
     const next = pickCandidate(candidates, current, Date.now(), new Set(), { cooldownMs })
     if (next) {
       const body = withModel(bare.body, next)

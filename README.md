@@ -228,6 +228,11 @@ bun test .        # bun（本机 magpie 自带 bun 亦可）
 
 ## 更新日志
 
+- **0.6.2**（2026-11-27）
+  - **清空 `DEAD_MODELS`** —— 之前判定的 3 个「全灭模型」（`inclusionai/ling-3.2-flash`、`google/gemma-4-31b-it`、`google/gemma-4-26b-a4b-it`）是**误判**。真正原因是 16 条账号记录缺 `type: "api"`，magpie 不走 API key 认证，所有请求一律 401，看起来像模型死掉。补上 `type` 后，10 个免费模型实测全部 200。
+  - `HEALTHY_MODELS` 从 9 个更新为 **12 个**（加入那 3 个 + `nvidia/nemotron-3-ultra-550b-a55b`），依据 2026-11-27 全量实测。
+  - 新增可注入的 `deadModels` 选项/参数：`fetchWithFailover` 与 `models` 钩子都接受它，默认仍用 `DEAD_MODELS`。这样内置名单清空后，「改投」与「隐藏」两条机制仍可被测试和用户显式启用。
+  - 测试同步改为注入死模型集合（4 个相关用例），并新增断言 `DEAD_MODELS.size === 0`。
 - **0.6.1**（2026-11-27）⚠ 严重修复
   - **修复：usage 钩子不再改写账号记录。** 之前为了给面板供数据，`pushSnapshotToOptions()` 调用 `client.auth.set` 并传入不完整的 body —— 而 `client.auth.set` 的 body 就是**整条账号记录**，于是 magpie 用它整体替换，把该账号的 `key` 抹掉。
     实测损失：连续两次 `magpie quota refresh` 后，带合法 key 的账号 **58 → 55**，GUI 里账号退化成 `Signed in (hash)` + `OpenRouter has no key for this account`。

@@ -25,17 +25,25 @@ export const AUTO = {
   tool_call: true,
 }
 
-// 2026-11-26 实测：模型级全灭（3 把 key 全 429 upstream）——任何 key 都调不通。
-export const DEAD_MODELS = new Set([
-  "inclusionai/ling-3.2-flash:free",
-  "google/gemma-4-31b-it:free",
-  "google/gemma-4-26b-a4b-it:free",
-])
+// 模型级「全灭」名单（任何 key 都调不通的模型）。
+//
+// 2026-11-27 复测后**已清空**。历史经过：
+//   · 2026-11-26 曾把 ling-3.2-flash / gemma-4-31b-it / gemma-4-26b-a4b-it 判为全灭；
+//   · 2026-11-27 发现那是**误判** —— 真正原因是 16 条账号记录缺 `type: "api"`，
+//     magpie 不走 API key 认证，所有请求一律 401，看起来像「模型死了」；
+//   · 补上 `type` 后，10 个免费模型全部 200（含那 3 个）。
+//
+// 保留这个空 Set 是因为 failover 的 fallbackToHealthy 机制仍在：上游以后再出现
+// 真正全灭的模型，把 id 加进来即可（也支持调用方通过 opts.deadModels 注入）。
+export const DEAD_MODELS = new Set()
 
-// 2026-11-26 实测 3 把 key × 12 模型矩阵里能稳定 200 的零价模型（含 openrouter/free
-// 路由器，但不含 openrouter/auto —— 它只是聊天路由名）。
+// 2026-11-27 实测 1 把 key × 10 模型全 200 的零价模型（含 openrouter/free 路由器，
+// 不含 openrouter/auto —— 它只是聊天路由名）。
 export const HEALTHY_MODELS = [
   "baidu/ernie-5.5-flash-preview:free",
+  "google/gemma-4-26b-a4b-it:free",
+  "google/gemma-4-31b-it:free",
+  "inclusionai/ling-3.2-flash:free",
   "liquid/lfm-3-1.7b:free",
   "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
   "nvidia/nemotron-3-ultra-550b-a55b:free",

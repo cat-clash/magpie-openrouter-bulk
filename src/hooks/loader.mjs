@@ -63,6 +63,8 @@ export function loaderHook(client, options, pacer) {
           healthyModelsOnly: options?.healthyModelsOnly === true,
           modelCooldownMs: options?.modelCooldownMs,
           maxRetries: options?.maxRetries,
+          // 允许用户/测试注入「全灭模型」名单（默认用内置 DEAD_MODELS，现为空）
+          ...(Array.isArray(options?.deadModels) ? { deadModels: new Set(options.deadModels) } : {}),
           client,
         })
         // 429 没被平台计数：把刚占的分钟配额退回去，别让失败吃掉自己的额度。
